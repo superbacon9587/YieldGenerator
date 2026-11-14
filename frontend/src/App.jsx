@@ -202,7 +202,7 @@ export default function App() {
                 onChange={(e) => modeChange(e.target.value === "demo")}
               >
                 <option value="demo">Demo mode</option>
-                <option value="live">Backend mode</option>
+                <option value="live">Live backend</option>
               </select>
             </label>
           </div>
@@ -238,7 +238,9 @@ export default function App() {
               <strong>
                 {mock
                   ? "Demo workspace. Sample results, not farm predictions."
-                  : "Backend workspace. Results come from your simulation server."}
+                  : result
+                    ? `${result.location.county || "County not supplied"} / ${result.location.cost_region || "Cost region not supplied"}`
+                    : "Live workspace. Ready to run your farm backtest."}
               </strong>
               <span>
                 {mock

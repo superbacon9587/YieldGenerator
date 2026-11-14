@@ -14,11 +14,11 @@ Open the URL Vite prints. It may select another port if 5173 is already occupied
 
 ## Demo and backend modes
 
-Demo is the initial default while Person A finishes the engine. The top-right selector switches modes and clears old results. Demo search supports Merced, Fresno, Sacramento, Nairobi, New Delhi, and Sao Paulo; coordinates are always editable. Demo outputs are synthetic, including deliberately constructed drought dips and scenario effects. They are not NASA-derived, calibrated, or validated. Changing location in demo does not change the synthetic climate.
+Live backend mode is the default. Demo remains available for offline walkthroughs. The top-right selector switches modes and clears old results. Demo search supports Merced, Fresno, Sacramento, Nairobi, New Delhi, and Sao Paulo; coordinates are always editable. Demo outputs are synthetic, including deliberately constructed drought dips and scenario effects. They are not NASA-derived, calibrated, or validated. Changing location in demo does not change the synthetic climate.
 
-Backend mode calls `GET /api/geocode?q=...` and `POST /api/simulate`. Vite proxies `/api` to `http://127.0.0.1:8000`. Start the backend separately using the team's instructions. The UI reports connection, timeout, validation, and malformed response errors; it never silently substitutes demo data for a failing real request.
+Backend mode calls `GET /api/geocode?q=...` and `POST /api/simulate`. Vite proxies `/api` to `http://127.0.0.1:8000`. Start the backend in a separate PowerShell window from the repository folder: `python -m uvicorn backend.api:app --reload`. The UI reports connection, timeout, validation, and malformed response errors; it never silently substitutes demo data for a failing real request.
 
-To default to backend mode, put `VITE_USE_MOCK=false` in `frontend/.env.local`, then restart Vite. No private API keys belong in Vite variables or browser code. The example environment file contains only the mode flag.
+To opt into offline demo mode at startup, put `VITE_USE_MOCK=true` in `frontend/.env.local`, then restart Vite. Otherwise leave the flag unset or set it to `false`. No private API keys belong in Vite variables or browser code. The example environment file contains only the mode flag.
 
 ## What is implemented
 
@@ -48,3 +48,25 @@ Backend integration needs an end-to-end pass once the backtest and location-cont
 ## Before a demo
 
 Run `npm test` and `npm run build`. Enter the example farm, run a demo, inspect each chart, change the selected year, and compare a water cut. Test empty flags and missing money with backend fixtures. Use narrow/mobile and desktop layouts. Keep the demo banner visible in screenshots or recordings of synthetic results.
+
+## Windows: run both servers
+
+In the first PowerShell window, from your repository folder:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m uvicorn backend.api:app --reload
+```
+
+Skip environment creation if `.venv` already exists. These commands use the environment directly, so PowerShell script activation is optional.
+
+In a second PowerShell window, from the same repository folder:
+
+```powershell
+cd frontend
+npm ci
+npm run dev
+```
+
+Keep both windows open. Select Live backend, run the default Merced farm, and check county, cost region, crop-by-crop results, and assumptions. The first real run may take longer while NASA weather is downloaded and cached. A historical backtest is a model of past conditions, not a guaranteed future harvest.
