@@ -71,10 +71,10 @@ We'll compare the modeled yield dips in known drought years (2014, 2015, 2021, a
 
 ## Team
 
-- _Name_
-- _Name_
-- _Name_
-- _Name_
+- _Marco Succari_
+- _Solorio Juarez_
+- _Vedant Panjabi_
+
 
 ## Project layout
 
