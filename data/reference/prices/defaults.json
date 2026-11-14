@@ -1,0 +1,26 @@
+{
+  "pump_efficiency": {
+    "value": 0.6,
+    "unit": "fraction (wire to water)",
+    "verify": false
+  },
+  "well_lift_ft": {
+    "value": 150,
+    "unit": "ft",
+    "verify": false,
+    "source": "Team assumption for Merced area total dynamic lift. User adjustable. Check DWR SGMA Portal well data for a specific farm."
+  },
+  "surface_water_price_per_af": {
+    "value": 50,
+    "unit": "$/acre-ft",
+    "verify": false,
+    "drought_year_value": 100,
+    "source": "Merced Irrigation District 2024 rate ($50/af); 2022 drought rate was $100/af"
+  },
+  "price_mode": {
+    "value": "current",
+    "allowed": ["current", "historical"],
+    "verify": false,
+    "note": "current: latest available price applied to every year. historical: each year's own price."
+  }
+}
