@@ -1,5 +1,7 @@
 import { generateMock } from "./mock/generate.js";
 import { validateResponse } from "./domain.js";
+import { FALLBACK_META, summaryOf } from "./features/summary/landBudget.js";
+import { rankLocally } from "./features/compare/savedSetups.js";
 export const USE_MOCK = import.meta.env?.VITE_USE_MOCK === "true";
 async function request(path, options = {}) {
   let response;
@@ -72,4 +74,34 @@ export async function geocode(query, { mock = USE_MOCK } = {}) {
   }
   const response = await request(`/api/geocode?q=${encodeURIComponent(query)}`);
   return Array.isArray(response) ? response : (response.results ?? []);
+}
+
+// Part A: backtest period range and saved-setup ranking.
+
+export async function meta({ mock = USE_MOCK } = {}) {
+  if (mock) return { ...FALLBACK_META };
+  try {
+    const m = await request("/api/meta");
+    return Number.isInteger(m?.first_year) && Number.isInteger(m?.last_full_year)
+      ? { ...FALLBACK_META, ...m }
+      : { ...FALLBACK_META };
+  } catch {
+    return { ...FALLBACK_META }; // older backend without /api/meta
+  }
+}
+
+export async function compareSetups(configs, rankedBy, { mock = USE_MOCK } = {}) {
+  if (mock) {
+    const entries = configs.map((c) => {
+      const result = generateMock(c.farm);
+      return { name: c.name, summary_stats: summaryOf(result), budget: null };
+    });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return { results: rankLocally(entries, rankedBy), ranked_by: rankedBy };
+  }
+  return request("/api/compare", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ configs, ranked_by: rankedBy }),
+  });
 }

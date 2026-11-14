@@ -1,0 +1,88 @@
+.save-setup {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.save-setup-form {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.save-setup-form input {
+  width: 190px;
+  margin: 0;
+}
+.save-setup-status {
+  font-size: 10px;
+  color: #5d7a5f;
+}
+.setup-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+.setup-card {
+  border: 1px solid #e6ebdd;
+  border-radius: 8px;
+  padding: 14px;
+  background: #fbfcf7;
+}
+.setup-card.picked {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px var(--green) inset;
+}
+.setup-pick {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  margin: 0 !important;
+}
+.setup-pick input {
+  width: auto !important;
+  margin: 0 !important;
+  accent-color: var(--green);
+}
+.setup-pick strong {
+  font-size: 13px;
+}
+.setup-card p {
+  font-size: 11px;
+  color: #5f7062;
+  margin: 8px 0 4px;
+}
+.setup-card small {
+  font-size: 9px;
+  color: #8a967f;
+}
+.setup-actions {
+  display: flex;
+  gap: 14px;
+  margin-top: 10px;
+}
+.setup-actions .danger {
+  color: #b36546;
+}
+.compare-controls {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.compare-controls .inline-label select {
+  width: auto !important;
+}
+.compare-table td,
+.compare-table th {
+  font-size: 11px;
+}
+.compare-rank {
+  font-weight: 700;
+  font-size: 14px !important;
+  color: var(--green);
+}
+.compare-best {
+  font-weight: 700;
+  color: var(--ink);
+}
