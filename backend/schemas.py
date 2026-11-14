@@ -45,10 +45,10 @@ WasteFlagType = Literal[
 ]
 YieldBasis = Literal["county", "state"]
 
-# NASA POWER daily data starts in 1981. A wrapping season ending in 1981 would
-# need 1980 weather, so the earliest safe start year is 1982 for those blocks;
+# NASA POWER daily data (backend/power_client.py) starts in 1984. A wrapping season ending in 1984 would
+# need 1983 weather, so the earliest safe start year is 1985 for those blocks;
 # the engine checks that, the schema only checks the outer bound.
-MIN_YEAR = 1981
+MIN_YEAR = 1984
 MAX_YEAR = 2100
 
 

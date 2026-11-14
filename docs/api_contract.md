@@ -18,7 +18,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 
 - **Months wrap around the new year.** `start_month: 11, end_month: 4` means November through April. `start_month: 1, end_month: 12` means year-round (use this for perennials).
 - **Season year.** A season that crosses the new year counts in the year it ends. Oats planted November 2014 and harvested April 2015 are the 2015 season.
-- **Weather data starts in 1981.** A block that wraps the new year needs the previous year's weather, so its earliest season year is 1982.
+- **Weather data starts in 1984 and ends December 31 of last year.** A block that wraps the new year needs the previous year's weather, so its earliest season year is 1985. A range the weather does not cover gets a `422` error that names the available dates.
 - **Null money.** `revenue`, `cost`, and `profit` can be `null` when a crop has no baseline yield, price, or production cost for the location. Water and yield are still filled in. The UI should show "No price data", not $0. Farm totals are `null` for any year where a block's value is `null`.
 
 ## Request
@@ -50,7 +50,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | `location.lat` | number | yes | -90 to 90 |
 | `location.lon` | number | yes | -180 to 180 |
 | `location.label` | string | no | Display name, echoed back |
-| `years` | `[start, end]` | yes | Inclusive. 1981 or later, start no later than end |
+| `years` | `[start, end]` | yes | Inclusive. 1984 or later, start no later than end, and no later than last year |
 | `price_mode` | `"current"` or `"historical"` | no, default `"current"` | `current` uses the latest price for every year. `historical` uses each year's own price |
 | `blocks` | list | yes, at least 1 | Block ids must be unique |
 | `blocks[].id` | string | yes | Short id such as `"b1"` |
