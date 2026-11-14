@@ -51,8 +51,6 @@ import BudgetBanner from "../features/summary/BudgetBanner.jsx";
 import ProductionChart from "../features/summary/ProductionChart.jsx";
 import SaveSetup from "../features/compare/SaveSetup.jsx";
 import { periodLabel } from "../features/summary/landBudget.js";
-import SystemComparisons from "../features/comparisons/SystemComparisons.jsx";
-import { comparisonChange } from "../features/comparisons/model.js";
 
 function Metric({ label, value, detail, icon: Icon }) {
   return (
@@ -242,26 +240,6 @@ export default function Results({ farm, result, mock, onBack }) {
       </div>
       <BudgetBanner result={result} />
       <SummaryCards result={result} />
-      <SystemComparisons
-        farm={farm}
-        comparisons={result.comparisons}
-        mock={mock}
-        disabled={busy}
-        onView={(row) => {
-          const next = comparisonChange(farm, row);
-          if (!next) return;
-          setSelected(row.block_id);
-          setChange(next);
-          setScenario(null);
-          setScenarioInput(null);
-          setError("");
-          const panel = document.getElementById("what-if");
-          const details = panel?.querySelector("details");
-          if (details) details.open = true;
-          panel?.scrollIntoView({ behavior: "smooth", block: "start" });
-          panel?.querySelector("select")?.focus({ preventScroll: true });
-        }}
-      />
       <p className="yield-note">
         <Info size={15} />
         <span>
