@@ -77,6 +77,25 @@ test("summary uses backend stats, or computes them for an older backend", () => 
   assert.equal(summaryOf({ farm_totals: [{ relative_yield: 1, water_applied_af: 1, profit: null }] }).total_profit, null);
 });
 
+test("summary fills Part A numbers around a partial summary_stats with avg_yield_tons", () => {
+  const s = summaryOf({
+    farm_totals: [{ relative_yield: 1, water_applied_af: 10, profit: 4, cost: 2 }],
+    summary_stats: { avg_yield_tons: 12.5 },
+  });
+  assert.equal(s.years_count, 1);
+  assert.equal(s.total_profit, 4);
+  assert.equal(s.avg_yield_tons, 12.5);
+  const fromWeights = summaryOf({
+    farm_totals: [],
+    yield_weight: [
+      { yearly: [{ year: 2001, tons: 10 }, { year: 2002, tons: 20 }] },
+      { yearly: [{ year: 2001, tons: 2 }, { year: 2002, tons: null }] },
+    ],
+  });
+  assert.equal(fromWeights.avg_yield_tons, 16);
+  assert.equal(summaryOf({ farm_totals: [] }).avg_yield_tons, null);
+});
+
 test("request sends available_acres and budget_usd, and validates them", () => {
   const farm = clone(DEFAULT_FARM);
   farm.optional.budget_usd = "250000";

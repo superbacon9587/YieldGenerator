@@ -1,35 +1,31 @@
-"""Whole-period summary, budget check, land use, and production for /api/simulate.
+"""Whole-period summary, budget check, and land use for /api/simulate.
 
-add_to_response(response, request, context) fills four response fields:
+add_to_response(response, request, context) fills three response fields:
 
     summary_stats  years_count, total_profit, avg_profit, avg_relative_yield,
-                   avg_water_applied_af, avg_cost. Profit and cost use only the
+                   avg_water_applied_af, avg_cost, avg_yield_tons. Profit and cost use only the
                    years where the farm total has them (a note says so when some
                    years are left out). relative_yield is already area weighted
                    per year in farm_totals; this is the mean over years.
+                   avg_yield_tons comes from the response's yield_weight
+                   (backend/yield_weight.py), the farm's average yearly harvest
+                   weight in US tons.
     budget         budget_usd from optional.budget_usd, years_over_budget (farm
                    cost above the budget), max_overrun_usd.
     land           available_acres, peak_acres_in_use, peak_month, and
                    over_capacity_months: for each calendar month, the acres of
                    every block in the ground that month (Nov to Apr wraps), so a
                    winter crop and a summer crop can share the same acres.
-    production     per block, yearly relative_yield x baseline_yield x acres in
-                   the baseline yield's unit without "/ ACRE" (LB, TONS, BU).
-                   Baseline yields come from get_location_context. None when
-                   the crop has no baseline yield.
 
 Every value that cannot be computed is None, never 0.
 """
 
 from __future__ import annotations
 
-import re
-
+from backend import yield_weight
 from backend.schemas import (
     BudgetOut,
     LandOut,
-    ProductionOut,
-    ProductionYearOut,
     SimulateRequest,
     SimulateResponse,
     SummaryStatsOut,
@@ -65,6 +61,7 @@ def summary_stats(response: SimulateResponse) -> tuple[SummaryStatsOut, list[str
         avg_relative_yield=_round(_mean([t.relative_yield for t in totals]), 3),
         avg_water_applied_af=_round(_mean([t.water_applied_af for t in totals]), 1),
         avg_cost=_round(_mean(costs)),
+        avg_yield_tons=yield_weight.avg_yield_tons(response.yield_weight),
     )
     return stats, notes
 
@@ -120,33 +117,6 @@ def land(request: SimulateRequest) -> tuple[LandOut, list[str]]:
     ), notes
 
 
-# ---------------------------------------------------------------- production
-
-def production_unit(unit: str) -> str:
-    """'LB / ACRE' -> 'LB', 'TONS / ACRE' -> 'TONS', 'BU/ACRE' -> 'BU'."""
-    return re.sub(r"\s*/\s*AC(RE)?\s*$", "", unit.strip(), flags=re.IGNORECASE).strip()
-
-
-def production(response: SimulateResponse, context: dict) -> list[ProductionOut]:
-    baselines = context.get("baseline_yields", {}) or {}
-    out = []
-    for b in response.blocks:
-        base = baselines.get(b.crop)
-        unit = production_unit(base["unit"]) if base else None
-        digits = 0 if unit and unit.upper().startswith("LB") else 1
-        out.append(ProductionOut(
-            block_id=b.id,
-            crop=b.crop,
-            unit=unit,
-            yearly=[ProductionYearOut(
-                year=y.year,
-                value=(_round(y.relative_yield * base["value"] * b.acres, digits)
-                       if base else None))
-                for y in b.yearly],
-        ))
-    return out
-
-
 # ---------------------------------------------------------------- hook
 
 def add_to_response(response: SimulateResponse, request: SimulateRequest,
@@ -157,6 +127,5 @@ def add_to_response(response: SimulateResponse, request: SimulateRequest,
     response.summary_stats = stats
     response.budget = bud
     response.land = lnd
-    response.production = production(response, context)
     response.assumptions.extend(n1 + n2 + n3)
     return response

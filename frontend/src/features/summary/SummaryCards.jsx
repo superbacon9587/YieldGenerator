@@ -1,6 +1,7 @@
 import { Droplets, PiggyBank, TrendingUp, Wallet, CalendarRange } from "lucide-react";
 import { money, number, percent } from "../../domain.js";
 import { summaryOf } from "./landBudget.js";
+import HarvestCard from "../yield/HarvestCard.jsx";
 import "./summary.css";
 
 function Card({ label, value, detail, icon: Icon }) {
@@ -16,12 +17,19 @@ function Card({ label, value, detail, icon: Icon }) {
   );
 }
 
-/** Top row: total profit, average profit, average yield, average water, best and worst year. */
+/**
+ * Top row: average harvest per year (Part C), total profit, average profit,
+ * average yield, average water, best and worst year.
+ */
 export default function SummaryCards({ result }) {
   const s = summaryOf(result);
   const years = s.years_count;
   return (
     <div className="metrics-grid summary-grid">
+      <HarvestCard
+        result={{ summary_stats: s }}
+        relativeYield={s.avg_relative_yield}
+      />
       <Card
         label="Total profit"
         value={money(s.total_profit)}

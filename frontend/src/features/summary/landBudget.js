@@ -60,9 +60,24 @@ export function periodLabel(years) {
   return `${last - first + 1}-year backtest, ${first} to ${last}`;
 }
 
-/** summary_stats from the backend, or the same numbers computed from farm_totals. */
+/** Average yearly farm harvest in tons from yield_weight, or null. */
+export function avgYieldTons(result) {
+  const totals = new Map();
+  for (const w of result?.yield_weight ?? [])
+    for (const r of w?.yearly ?? [])
+      if (typeof r?.tons === "number")
+        totals.set(r.year, (totals.get(r.year) ?? 0) + r.tons);
+  return mean([...totals.values()]);
+}
+
+/**
+ * summary_stats from the backend, or the same numbers computed from
+ * farm_totals and yield_weight. A partial summary_stats (an older backend or
+ * the demo fixture, which only send avg_yield_tons) is filled in.
+ */
 export function summaryOf(result) {
-  if (result?.summary_stats) return result.summary_stats;
+  const sent = result?.summary_stats;
+  if (sent && sent.years_count != null) return sent;
   const rows = result?.farm_totals ?? [];
   const profits = rows.map((r) => r.profit).filter((v) => v != null);
   return {
@@ -72,6 +87,8 @@ export function summaryOf(result) {
     avg_relative_yield: mean(rows.map((r) => r.relative_yield)),
     avg_water_applied_af: mean(rows.map((r) => r.water_applied_af)),
     avg_cost: mean(rows.map((r) => r.cost)),
+    avg_yield_tons: avgYieldTons(result),
+    ...sent,
   };
 }
 

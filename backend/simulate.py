@@ -65,7 +65,8 @@ function (well lift and pump efficiency from defaults.json, electricity from
 utilities.csv). A block with no baseline yield, crop price, or production cost
 gets null revenue, cost, and profit, and a note in assumptions.
 
-Waste flags are built in backend/waste.py.
+Waste flags are built in backend/waste.py. Harvest weight in tons (yield_weight) is built in
+backend/yield_weight.py; summary_stats.avg_yield_tons is added by backend/summary.py.
 """
 
 from __future__ import annotations
@@ -81,7 +82,7 @@ from statistics import median
 import numpy as np
 import pandas as pd
 
-from backend import economics, reference, waste
+from backend import economics, reference, waste, yield_weight
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
@@ -702,6 +703,11 @@ def build_response(bt: Backtest) -> SimulateResponse:
                            + ", ".join(left_out) + ").")
     assumptions.append(f"Best, worst, and typical years are ranked by {metric}.")
 
+    # Harvest weight in tons (backend/yield_weight.py).
+    weight_notes: dict[str, None] = {}
+    weights = yield_weight.build_yield_weight(blocks, ctx, weight_notes)
+    assumptions.extend(yield_weight.assumptions(weights, weight_notes))
+
     return SimulateResponse(
         location=LocationOut(label=req.location.label, grid_cell=bt.grid_cell,
                              county=ctx.get("county"), cost_region=ctx.get("cost_region")),
@@ -711,6 +717,7 @@ def build_response(bt: Backtest) -> SimulateResponse:
         summary=summary,
         waste_flags=waste.build_flags(bt),
         assumptions=assumptions,
+        yield_weight=weights,
     )
 
 

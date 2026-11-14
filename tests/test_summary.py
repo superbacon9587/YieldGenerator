@@ -1,7 +1,9 @@
+import statistics
+
 import pytest
 
 from backend import simulate as sim
-from backend import summary
+from backend import summary, units
 from backend.schemas import SimulateRequest
 from conftest import make_context
 from test_simulate import block, request
@@ -145,30 +147,46 @@ def test_land_peak_month_and_note_in_response(weather):
     assert any("exceed the 50.0 available acres" in a for a in resp.assumptions)
 
 
-# ---------------------------------------------------------------- production
+# ---------------------------------------------------------------- yield weight (was production)
 
 @pytest.mark.parametrize("unit,expected", [
-    ("LB / ACRE", "LB"), ("TONS / ACRE", "TONS"), ("BU/ACRE", "BU"), ("BU / AC", "BU"),
+    ("LB / ACRE", "lb / 2000"), ("TONS / ACRE", "already tons"), ("BU/ACRE", "bu x 56 lb / 2000"),
+    ("bu / acre", "bu x 56 lb / 2000"),
 ])
-def test_production_unit(unit, expected):
-    assert summary.production_unit(unit) == expected
+def test_yield_weight_conversion_text(unit, expected):
+    assert units.conversion_text(unit, "corn") == expected
 
 
-def test_production_math(weather):
+def test_yield_weight_math(weather):
     _, resp = simulate(weather)
-    prod = {p.block_id: p for p in resp.production}
+    weights = {w.block_id: w for w in resp.yield_weight}
+    assert [w.block_id for w in resp.yield_weight] == ["b1", "b2", "b3"]
     almonds = resp.blocks[0].yearly
-    assert prod["b1"].unit == "LB"
-    for p, y in zip(prod["b1"].yearly, almonds):
-        assert p.year == y.year
-        assert p.value == pytest.approx(y.relative_yield * 2000 * 40, abs=1)
-    assert prod["b3"].unit == "BU"
-    assert prod["b3"].yearly[0].value == pytest.approx(
-        resp.blocks[2].yearly[0].relative_yield * 160 * 15, abs=0.1)
+    assert weights["b1"].source_unit == "LB / ACRE"
+    median_ry = statistics.median(y.relative_yield for y in almonds)
+    for w, y in zip(weights["b1"].yearly, almonds):
+        assert w.year == y.year
+        assert w.relative_yield == y.relative_yield
+        assert w.tons == pytest.approx(
+            2000 / 2000 * y.relative_yield / median_ry * 40, abs=0.01)
+    assert weights["b3"].source_unit == "BU / ACRE"
+    corn = resp.blocks[2].yearly
+    corn_median = statistics.median(y.relative_yield for y in corn)
+    assert weights["b3"].yearly[0].tons == pytest.approx(
+        160 * 56 / 2000 * corn[0].relative_yield / corn_median * 15, abs=0.01)
 
 
-def test_production_null_without_baseline(weather):
+def test_summary_stats_avg_yield_tons(weather):
+    _, resp = simulate(weather)
+    per_year = [sum(w.yearly[i].tons for w in resp.yield_weight)
+                for i in range(len(resp.years))]
+    assert resp.summary_stats.avg_yield_tons == pytest.approx(
+        sum(per_year) / len(per_year), abs=0.01)
+
+
+def test_yield_weight_null_without_baseline(weather):
     _, resp = simulate(weather, blocks=[block("b4", crop="processing_tomatoes", start=4, end=8)])
-    (p,) = resp.production
-    assert p.unit is None
-    assert all(y.value is None for y in p.yearly)
+    (w,) = resp.yield_weight
+    assert w.source_unit is None
+    assert all(y.tons is None and y.tons_per_acre is None for y in w.yearly)
+    assert resp.summary_stats.avg_yield_tons is None

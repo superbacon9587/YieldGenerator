@@ -197,6 +197,28 @@ class WasteFlagOut(BaseModel):
         ge=0, description="Dollars per year; None when water prices are unavailable")
 
 
+class YieldWeightYearOut(BaseModel):
+    year: int
+    tons_per_acre: float | None = Field(
+        description="US tons (2,000 lb) per acre. None when the crop has no baseline yield")
+    tons: float | None = Field(description="tons_per_acre x acres")
+    relative_yield: float = Field(ge=0, le=1, description="Same value as blocks[].yearly[]")
+
+
+class BlockYieldWeightOut(BaseModel):
+    block_id: str
+    crop: Crop
+    acres: float
+    source_unit: str | None = Field(
+        description='Unit of the NASS baseline yield, for example "BU / ACRE". '
+                    "None when the crop has no baseline yield")
+    conversion: str | None = Field(
+        description='Short text such as "lb / 2000". None when there is no weight')
+    yearly: list[YieldWeightYearOut]
+    avg_tons: float | None = Field(description="Mean of yearly tons")
+    avg_tons_per_acre: float | None = Field(description="Mean of yearly tons_per_acre")
+
+
 class ComparisonSystem(BaseModel):
     irrigation: Irrigation
     start_month: int = Field(ge=1, le=12)
@@ -224,6 +246,9 @@ class SummaryStatsOut(BaseModel):
     avg_relative_yield: float | None = Field(description="Mean of the area-weighted farm values")
     avg_water_applied_af: float | None
     avg_cost: float | None
+    avg_yield_tons: float | None = Field(
+        default=None,
+        description="Average over years of the total harvest weight of all blocks, US tons")
 
 
 class BudgetOut(BaseModel):
@@ -240,18 +265,6 @@ class LandOut(BaseModel):
         description="Months where acres in the ground exceed available_acres")
 
 
-class ProductionYearOut(BaseModel):
-    year: int
-    value: float | None
-
-
-class ProductionOut(BaseModel):
-    block_id: str
-    crop: Crop
-    unit: str | None = Field(description='Baseline yield unit without "/ ACRE", for example "LB"')
-    yearly: list[ProductionYearOut]
-
-
 class SimulateResponse(BaseModel):
     location: LocationOut
     years: list[int]
@@ -264,7 +277,8 @@ class SimulateResponse(BaseModel):
     summary_stats: SummaryStatsOut | None = None
     budget: BudgetOut | None = None
     land: LandOut | None = None
-    production: list[ProductionOut] = Field(default_factory=list)
+    yield_weight: list[BlockYieldWeightOut] = Field(
+        default_factory=list, description="Harvest weight per block and year (Part C)")
 
 
 # ---------------------------------------------------------------- location context

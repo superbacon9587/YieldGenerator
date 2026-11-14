@@ -36,7 +36,7 @@
   margin-bottom: 14px;
 }
 .summary-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 .summary-card > strong {
   font-size: 26px;
@@ -83,6 +83,11 @@
 }
 .production-chart {
   height: 170px;
+}
+@media (max-width: 1250px) {
+  .summary-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 @media (max-width: 1100px) {
   .summary-grid {

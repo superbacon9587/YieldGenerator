@@ -7,51 +7,75 @@ import {
   YAxis,
   Tooltip,
 } from "recharts";
-import { CROPS, number } from "../../domain.js";
+import { CROPS } from "../../domain.js";
+import { useYieldUnit } from "../yield/YieldUnitContext.jsx";
+import { hasWeight } from "../yield/yieldData.js";
+import {
+  formatAxisTick,
+  formatWeight,
+  toUnit,
+  unitLabel,
+} from "../yield/yieldUnits.js";
 import "./summary.css";
 
-const UNIT_NAMES = { LB: "lb", TONS: "tons", TON: "tons", BU: "bushels", CWT: "cwt" };
-export const unitName = (u) => (u ? (UNIT_NAMES[u.toUpperCase()] ?? u.toLowerCase()) : null);
-
-/** One small chart per crop entry, each in its own real unit. */
+/** One small chart per crop entry: total harvest weight per year, from yield_weight. */
 export default function ProductionChart({ result }) {
-  const items = result.production ?? [];
+  const { unit } = useYieldUnit();
+  const items = Array.isArray(result?.yield_weight) ? result.yield_weight : [];
   if (!items.length)
     return (
       <div className="empty-inline">
-        Production in tons or pounds is not available from this backend.
+        Harvest weight is not available from this backend.
       </div>
     );
   return (
     <div className="production-grid">
-      {items.map((p) => {
-        const crop = CROPS[p.crop];
-        const unit = unitName(p.unit);
-        const hasData = unit && p.yearly.some((y) => y.value != null);
+      {items.map((w) => {
+        const crop = CROPS[w.crop];
+        const rows = (w.yearly ?? []).map((r) => ({
+          year: r.year,
+          tons: r.tons ?? null,
+          value: toUnit(r.tons, unit),
+        }));
         return (
-          <div className="production-card" key={p.block_id}>
+          <div className="production-card" key={w.block_id}>
             <div className="production-title">
               <span className="crop-dot" style={{ background: crop?.color }} />
-              <strong>{crop?.name ?? p.crop}</strong>
+              <strong>{crop?.name ?? w.crop}</strong>
               <small>
-                {p.block_id} · {unit ?? "no baseline yield"}
+                {w.block_id} ·{" "}
+                {hasWeight(w) ? unitLabel(unit, false) : "no baseline yield"}
               </small>
             </div>
-            {hasData ? (
+            {hasWeight(w) ? (
               <div className="production-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={p.yearly} margin={{ top: 6, right: 6, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#e5e9df" />
-                    <XAxis dataKey="year" tick={{ fontSize: 10 }} minTickGap={24} />
+                  <BarChart
+                    data={rows}
+                    margin={{ top: 6, right: 6, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 4"
+                      vertical={false}
+                      stroke="#e5e9df"
+                    />
+                    <XAxis
+                      dataKey="year"
+                      tick={{ fontSize: 10 }}
+                      minTickGap={24}
+                    />
                     <YAxis
                       tick={{ fontSize: 10 }}
                       width={52}
                       tickFormatter={(v) =>
-                        v >= 10000 ? `${number(v / 1000)}k` : number(v)
+                        formatAxisTick(unit === "lb" ? v / 2000 : v, unit)
                       }
                     />
                     <Tooltip
-                      formatter={(v) => [`${number(v, unit === "lb" ? 0 : 1)} ${unit}`, crop?.name]}
+                      formatter={(_, __, item) => [
+                        formatWeight(item?.payload?.tons, unit, false),
+                        crop?.name,
+                      ]}
                       contentStyle={{ fontSize: 12, borderRadius: 8 }}
                     />
                     <Bar

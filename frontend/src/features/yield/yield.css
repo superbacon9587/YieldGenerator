@@ -1,0 +1,92 @@
+/* Harvest weight (Part C). Matches the tokens in src/styles.css. */
+.yield-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+.yield-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.yield-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  background: #f0f3e9;
+  border: 1px solid #e3e9d9;
+  border-radius: 20px;
+  padding: 7px 12px;
+  color: #66745f;
+}
+.yield-chip[aria-pressed="true"] {
+  background: var(--green);
+  border-color: var(--green);
+  color: #fffefa;
+}
+.yield-chip:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.yield-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.yield-empty {
+  margin-top: 15px;
+}
+
+/* Average harvest per year card. */
+.metrics-grid.with-harvest {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+.harvest-metric > strong {
+  font:
+    700 30px "DM Sans",
+    sans-serif;
+  letter-spacing: -0.8px;
+  color: var(--green);
+}
+.harvest-metric > strong span {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.harvest-metric > small {
+  color: #8a967c;
+}
+
+/* Table: tons per acre with percent of potential underneath. */
+td small.potential {
+  display: block;
+  color: #9aa58c;
+  font-size: 9px;
+  padding-top: 3px;
+}
+
+@media (max-width: 1250px) {
+  .metrics-grid.with-harvest {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .metrics-grid.with-harvest .harvest-metric {
+    grid-column: 1 / -1;
+  }
+}
+@media (max-width: 350px) {
+  .metrics-grid.with-harvest {
+    grid-template-columns: 1fr;
+  }
+}
+@media print {
+  .metrics-grid.with-harvest {
+    grid-template-columns: repeat(5, 1fr);
+  }
+  .metrics-grid.with-harvest .harvest-metric {
+    grid-column: auto;
+  }
+}
