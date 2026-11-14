@@ -61,7 +61,10 @@ export const DEFAULT_FARM = {
     water_available_af: null,
     water_applied_af: null,
     surface_water_share: 0.5,
+    budget_usd: null,
   },
+  available_acres: 70,
+  period: "20",
 };
 export const clone = (x) => structuredClone(x);
 export const mean = (values) => {
@@ -125,7 +128,15 @@ export function requestFromForm(form) {
           ? null
           : Number(form.optional.water_applied_af),
       surface_water_share: Number(form.optional.surface_water_share),
+      budget_usd:
+        form.optional.budget_usd === "" || form.optional.budget_usd == null
+          ? null
+          : Number(form.optional.budget_usd),
     },
+    available_acres:
+      form.available_acres === "" || form.available_acres == null
+        ? null
+        : Number(form.available_acres),
   };
 }
 export function validateFarm(farm) {
@@ -177,6 +188,16 @@ export function validateFarm(farm) {
       errors.push(
         "Water amounts must be zero or a positive number. Leave unknown amounts blank.",
       );
+  if (
+    farm.available_acres !== undefined &&
+    (!Number.isFinite(farm.available_acres) || farm.available_acres <= 0)
+  )
+    errors.push("Enter your available acreage, more than 0 acres.");
+  if (
+    farm.optional.budget_usd != null &&
+    (!Number.isFinite(farm.optional.budget_usd) || farm.optional.budget_usd < 0)
+  )
+    errors.push("The yearly budget must be zero or a positive dollar amount.");
   if (
     !Number.isFinite(farm.optional.surface_water_share) ||
     farm.optional.surface_water_share < 0 ||

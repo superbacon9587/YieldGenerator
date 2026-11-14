@@ -41,7 +41,9 @@ test("request matches contract, preserves zero water and strips UI fields", () =
     "price_mode",
     "blocks",
     "optional",
+    "available_acres",
   ]);
+  assert.equal("period" in r, false);
 });
 test("blank coordinates are not silently treated as zero", () => {
   const farm = clone(DEFAULT_FARM);

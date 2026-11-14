@@ -34,7 +34,8 @@ def test_simulate_endpoint(client, monkeypatch):
     assert r.status_code == 200, r.text
     data = r.json()
     assert set(data) == {"location", "years", "blocks", "farm_totals", "summary",
-                         "waste_flags", "assumptions", "comparisons"}
+                         "waste_flags", "assumptions", "comparisons",
+                         "summary_stats", "budget", "land", "production"}
     assert len(data["comparisons"]) == 9
     assert all("excludes" in row for row in data["comparisons"])
     assert data["location"]["county"] == "Merced"

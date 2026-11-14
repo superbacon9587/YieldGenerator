@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   FlaskConical,
   PanelLeftClose,
+  Scale,
   Check,
   Info,
   Menu,
@@ -13,13 +14,19 @@ import {
 } from "lucide-react";
 import FarmForm from "./components/FarmForm.jsx";
 const Results = lazy(() => import("./components/Results.jsx"));
+const ComparePage = lazy(() => import("./features/compare/ComparePage.jsx"));
 import {
   DEFAULT_FARM,
   clone,
   requestFromForm,
   validateFarm,
 } from "./domain.js";
-import { simulate, USE_MOCK } from "./api.js";
+import { simulate, USE_MOCK, meta as fetchMeta } from "./api.js";
+import {
+  FALLBACK_META,
+  presetYears,
+  withPartADefaults,
+} from "./features/summary/landBudget.js";
 
 const STORAGE = "yieldgenerator-farm-v1";
 function initialFarm() {
@@ -44,7 +51,7 @@ function initialFarm() {
       Array.isArray(saved.years) &&
       saved.optional
     )
-      return saved;
+      return withPartADefaults(saved);
   } catch {}
   return clone(DEFAULT_FARM);
 }
@@ -57,8 +64,23 @@ export default function App() {
     [result, setResult] = useState(null),
     [submitted, setSubmitted] = useState(null),
     [navOpen, setNavOpen] = useState(false),
-    [saved, setSaved] = useState(true);
+    [saved, setSaved] = useState(true),
+    [meta, setMeta] = useState(FALLBACK_META);
   const heading = useRef(null);
+  useEffect(() => {
+    let live = true;
+    fetchMeta({ mock }).then((m) => live && setMeta(m));
+    return () => {
+      live = false;
+    };
+  }, [mock]);
+  useEffect(() => {
+    // Keep preset periods ending at the last full year of weather data.
+    if (!farm.period || farm.period === "custom") return;
+    const [a, b] = presetYears(farm.period, meta);
+    if (Number(farm.years[0]) !== a || Number(farm.years[1]) !== b)
+      setFarm((f) => ({ ...f, years: [a, b] }));
+  }, [meta, farm.period, farm.years[0], farm.years[1]]);
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE, JSON.stringify(farm));
@@ -141,6 +163,13 @@ export default function App() {
           >
             <LayoutDashboard size={18} /> Backtest results<span>02</span>
           </button>
+          <button
+            className={view === "compare" ? "active" : ""}
+            aria-current={view === "compare" ? "page" : undefined}
+            onClick={() => navigate("compare")}
+          >
+            <Scale size={18} /> Compare setups<span>03</span>
+          </button>
         </nav>
         <div className="sidebar-note">
           <div className="orbit" aria-hidden="true">
@@ -185,7 +214,13 @@ export default function App() {
             </button>
             <span className="breadcrumb">
               Workspace <span>/</span>{" "}
-              <b>{view === "farm" ? "Your farm" : "Backtest results"}</b>
+              <b>
+                {view === "farm"
+                  ? "Your farm"
+                  : view === "compare"
+                    ? "Compare setups"
+                    : "Backtest results"}
+              </b>
             </span>
           </div>
           <div className="topbar-actions">
@@ -213,17 +248,23 @@ export default function App() {
               <p className="eyebrow">
                 {view === "farm"
                   ? "START WITH WHAT YOU GROW"
-                  : "UNDERSTAND THE PAST. EXPLORE WHAT’S NEXT."}
+                  : view === "compare"
+                    ? "SAME WEATHER. DIFFERENT SETUPS."
+                    : "UNDERSTAND THE PAST. EXPLORE WHAT’S NEXT."}
               </p>
               <h1 ref={heading} tabIndex="-1">
                 {view === "farm"
                   ? "Every farm has a story."
-                  : "Your farm, through the years."}
+                  : view === "compare"
+                    ? "Compare setups."
+                    : "Your farm, through the years."}
               </h1>
               <p>
                 {view === "farm"
                   ? "Tell us about yours. Explore yield, water needs, and the possibilities in between."
-                  : "Explore historical outcomes, understand the assumptions, and compare a change."}
+                  : view === "compare"
+                    ? "Put saved setups side by side over the same years and weather."
+                    : "Explore historical outcomes, understand the assumptions, and compare a change."}
               </p>
             </div>
             <span className="edition">
@@ -261,11 +302,30 @@ export default function App() {
               busy={busy}
               error={error}
               mock={mock}
+              meta={meta}
               onReset={() => {
                 setFarm(clone(DEFAULT_FARM));
                 setError("");
               }}
             />
+          ) : view === "compare" ? (
+            <Suspense
+              fallback={
+                <div className="panel" role="status">
+                  Loading saved setups...
+                </div>
+              }
+            >
+              <ComparePage
+                mock={mock}
+                onLoad={(saved) => {
+                  setFarm(withPartADefaults(clone(saved)));
+                  setError("");
+                  setView("farm");
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
+              />
+            </Suspense>
           ) : (
             <Suspense
               fallback={

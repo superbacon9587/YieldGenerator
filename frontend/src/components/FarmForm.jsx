@@ -12,6 +12,9 @@ import {
 import { CROPS, IRRIGATION, MONTHS, number, toAcres } from "../domain.js";
 import { geocode } from "../api.js";
 import Timeline from "./Timeline.jsx";
+import LandBudgetPanel from "../features/summary/LandBudgetPanel.jsx";
+import LandCheck from "../features/summary/LandCheck.jsx";
+import PeriodPresets from "../features/summary/PeriodPresets.jsx";
 
 function BlockEditor({ block, index, onChange, onRemove }) {
   const [unit, setUnit] = useState("acres");
@@ -140,6 +143,7 @@ export default function FarmForm({
   error,
   mock,
   onReset,
+  meta,
 }) {
   const [query, setQuery] = useState(""),
     [matches, setMatches] = useState([]),
@@ -299,10 +303,15 @@ export default function FarmForm({
             </div>
           </details>
         </section>
+        <LandBudgetPanel
+          farm={farm}
+          setFarm={setFarm}
+          eyebrow="02 / LAND AND BUDGET"
+        />
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">02 / CROPS</span>
+              <span className="eyebrow">03 / CROPS</span>
               <h2>What is in the ground?</h2>
             </div>
             <span className="chip">{farm.blocks.length} crop entries</span>
@@ -366,13 +375,15 @@ export default function FarmForm({
           </p>
         </section>
         <Timeline blocks={farm.blocks} />
+        <LandCheck blocks={farm.blocks} available={farm.available_acres} />
         <section className="panel">
           <div className="panel-heading">
             <div>
-              <span className="eyebrow">03 / HISTORICAL WINDOW</span>
+              <span className="eyebrow">04 / HISTORICAL WINDOW</span>
               <h2>Look back before looking ahead.</h2>
             </div>
           </div>
+          <PeriodPresets farm={farm} setFarm={setFarm} meta={meta}>
           <div className="form-grid two">
             <label>
               From year
@@ -399,6 +410,7 @@ export default function FarmForm({
               />
             </label>
           </div>
+          </PeriodPresets>
           <p className="caption">
             These are historical simulations, not a forecast. Crops crossing
             December count in the year their season ends.
