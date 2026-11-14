@@ -734,4 +734,5 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
     if include_comparisons:
         from backend.comparisons import build_comparisons
         response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
-    return response
+    from backend import summary
+    return summary.add_to_response(response, request, ctx)
