@@ -1,6 +1,6 @@
 import { generateMock } from "./mock/generate.js";
 import { validateResponse } from "./domain.js";
-export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== "false";
+export const USE_MOCK = import.meta.env?.VITE_USE_MOCK === "true";
 async function request(path, options = {}) {
   let response;
   try {
@@ -12,7 +12,7 @@ async function request(path, options = {}) {
     throw new Error(
       error.name === "TimeoutError"
         ? "The simulation timed out. Try fewer years or check the backend."
-        : "Cannot reach the backend. Start Person A’s server on port 8000, or select Demo mode.",
+        : "Cannot reach the backend. In the project folder, run: python -m uvicorn backend.api:app --reload. Keep that window open, or select Demo mode for offline samples.",
     );
   }
   let body;
@@ -20,7 +20,7 @@ async function request(path, options = {}) {
     body = await response.json();
   } catch {
     throw new Error(
-      "The backend did not return JSON. Check that the simulation server is running.",
+      "The backend is unavailable or did not return JSON. In the project folder, run: python -m uvicorn backend.api:app --reload. Keep that window open.",
     );
   }
   if (!response.ok) {
