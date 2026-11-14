@@ -39,7 +39,6 @@ import {
 import { simulate } from "../api.js";
 import Timeline from "./Timeline.jsx";
 import YieldWeightChart from "../features/yield/YieldWeightChart.jsx";
-import HarvestCard from "../features/yield/HarvestCard.jsx";
 import { useYieldUnit } from "../features/yield/YieldUnitContext.jsx";
 import { weightByBlock, weightRow } from "../features/yield/yieldData.js";
 import {
@@ -47,6 +46,11 @@ import {
   potentialPercent,
   unitLabel,
 } from "../features/yield/yieldUnits.js";
+import SummaryCards from "../features/summary/SummaryCards.jsx";
+import BudgetBanner from "../features/summary/BudgetBanner.jsx";
+import ProductionChart from "../features/summary/ProductionChart.jsx";
+import SaveSetup from "../features/compare/SaveSetup.jsx";
+import { periodLabel } from "../features/summary/landBudget.js";
 
 function Metric({ label, value, detail, icon: Icon }) {
   return (
@@ -170,7 +174,13 @@ export default function Results({ farm, result, mock, onBack }) {
     };
   });
   const flagged = result.summary.drought_years ?? [];
-  const unit = chart === "water" ? "acre-feet applied" : "USD";
+  const overBudget = new Set(result.budget?.years_over_budget ?? []);
+  const unit =
+    chart === "water"
+      ? "acre-feet applied"
+      : chart === "production"
+        ? `Harvest weight per crop entry, in ${unitLabel(yieldUnit, false)}`
+        : "USD";
   async function compare(type = "custom", override) {
     setBusy(true);
     setError("");
@@ -209,6 +219,7 @@ export default function Results({ farm, result, mock, onBack }) {
           <ArrowLeft size={15} /> Edit farm
         </button>
         <div>
+          <SaveSetup farm={farm} result={result} />
           <button className="secondary" onClick={() => window.print()}>
             <Printer size={15} /> Print
           </button>
@@ -230,55 +241,17 @@ export default function Results({ farm, result, mock, onBack }) {
       </div>
       <div className="result-context">
         <MapLabel location={result.location.label} />
-        <span>
-          {result.years[0]} to {result.years.at(-1)} · {result.years.length}{" "}
-          historical seasons
-        </span>
+        <span className="period-line">{periodLabel(result.years)}</span>
       </div>
-      <div className="metrics-grid with-harvest">
-        <HarvestCard result={result} relativeYield={metrics.yield} />
-        <Metric
-          label="Relative yield"
-          value={percent(metrics.yield)}
-          detail="Mean of yearly area-weighted fractions"
-          icon={TrendingUp}
-        />
-        <Metric
-          label="Water applied / year"
-          value={`${number(metrics.water, 1)}`}
-          detail="acre-feet, historical mean"
-          icon={Droplets}
-        />
-        <Metric
-          label="Profit / year"
-          value={money(metrics.profit)}
-          detail="Mean of available financial results"
-          icon={Wallet}
-        />
-        <div className="metric year-metric">
-          <span className="metric-label">
-            Historical comparison
-            <TrendingUp size={17} />
-          </span>
-          <div>
-            <span>
-              <small>Best year</small>
-              <strong>{result.summary.best_year ?? "Not available"}</strong>
-            </span>
-            <span>
-              <small>Worst year</small>
-              <strong>{result.summary.worst_year ?? "Not available"}</strong>
-            </span>
-          </div>
-          <small>Ranking method is listed in assumptions</small>
-        </div>
-      </div>
+      <BudgetBanner result={result} />
+      <SummaryCards result={result} />
       <p className="yield-note">
         <Info size={15} />
         <span>
           Harvest weight starts from the county's typical (median) NASS yield
           and moves up or down with each year's growing conditions. The percent
           of potential compares against a crop with no water or heat stress.
+          The Production tab shows each crop entry's total harvest weight.
         </span>
       </p>
       <Timeline blocks={farm.blocks} compact />
@@ -291,11 +264,13 @@ export default function Results({ farm, result, mock, onBack }) {
                 ? "How yield changes across years"
                 : chart === "water"
                   ? "Where the water goes"
-                  : "The economics, year by year"}
+                  : chart === "production"
+                    ? "What each crop produced"
+                    : "The economics, year by year"}
             </h2>
           </div>
           <div className="segmented chart-tabs" aria-label="Chart view">
-            {["yield", "water", "profit"].map((key) => (
+            {["yield", "water", "profit", "production"].map((key) => (
               <button
                 key={key}
                 aria-pressed={chart === key}
@@ -305,13 +280,20 @@ export default function Results({ farm, result, mock, onBack }) {
                   ? "Yield"
                   : key === "water"
                     ? "Water"
-                    : "Profit"}
+                    : key === "profit"
+                      ? "Profit"
+                      : "Production"}
               </button>
             ))}
           </div>
         </div>
         {chart === "yield" ? (
           <YieldWeightChart result={result} mock={mock} />
+        ) : chart === "production" ? (
+          <>
+            <p className="caption">{unit}</p>
+            <ProductionChart result={result} />
+          </>
         ) : (
           <>
             <p className="caption">
@@ -391,6 +373,10 @@ export default function Results({ farm, result, mock, onBack }) {
                           <Cell
                             key={r.year}
                             fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
+                            stroke={
+                              overBudget.has(r.year) ? "#d39a2c" : undefined
+                            }
+                            strokeWidth={overBudget.has(r.year) ? 3 : 0}
                           />
                         ))}
                       </Bar>
@@ -403,6 +389,8 @@ export default function Results({ farm, result, mock, onBack }) {
         )}
         {chart === "profit" && (
           <p className="caption">
+            {overBudget.size > 0 &&
+              "Amber outline: farm cost was above your budget that year. "}
             Missing profit remains unavailable, not zero. Farm financial totals
             may include only crops with price and cost data; check the
             assumptions.

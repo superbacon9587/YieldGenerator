@@ -8,6 +8,8 @@ Endpoints:
     GET /api/weather?lat=..&lon=..  cached daily POWER data plus FAO-56 ET0
     GET /api/context?lat=..&lon=..  county, cost region, baseline yields, costs, water price
     POST /api/simulate              farm backtest (docs/api_contract.md)
+    GET /api/meta                   first and last backtest years, period presets
+    POST /api/compare               rank 2 to 6 saved farm setups
 """
 
 from __future__ import annotations
@@ -22,7 +24,14 @@ from backend import geocode as geocode_mod
 from backend import power_client, regions
 from backend import simulate as simulate_mod
 from backend.et0 import et0_fao56
-from backend.schemas import SimulateRequest, SimulateResponse
+from backend import compare as compare_mod
+from backend.schemas import (
+    CompareRequest,
+    CompareResponse,
+    MetaResponse,
+    SimulateRequest,
+    SimulateResponse,
+)
 
 app = FastAPI(title="YieldGenerator API")
 
@@ -91,6 +100,35 @@ def simulate(req: SimulateRequest) -> SimulateResponse:
     """Backtest a farm over the requested years. Contract: docs/api_contract.md."""
     try:
         return simulate_mod.simulate(req)
+    except simulate_mod.WeatherUnavailableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Data service error: {exc}") from exc
+
+
+PERIOD_PRESETS = (5, 10, 20, 30, 40)
+
+
+@app.get("/api/meta", response_model=MetaResponse)
+def meta() -> MetaResponse:
+    """Backtest year range and the period presets that fit inside it.
+
+    first_year is the first full year with weather for every season: POWER
+    daily data starts in 1984, and a season that wraps the new year needs the
+    previous year, so 1985 is the first year any block can use.
+    """
+    first = power_client.START_DATE.year + 1
+    last = power_client.default_end_date().year
+    span = last - first + 1
+    return MetaResponse(first_year=first, last_full_year=last,
+                        presets=[p for p in PERIOD_PRESETS if p <= span])
+
+
+@app.post("/api/compare", response_model=CompareResponse)
+def compare(req: CompareRequest) -> CompareResponse:
+    """Run 2 to 6 farm setups and rank them by one summary number."""
+    try:
+        return compare_mod.compare(req)
     except simulate_mod.WeatherUnavailableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except requests.RequestException as exc:

@@ -65,8 +65,8 @@ function (well lift and pump efficiency from defaults.json, electricity from
 utilities.csv). A block with no baseline yield, crop price, or production cost
 gets null revenue, cost, and profit, and a note in assumptions.
 
-Waste flags are built in backend/waste.py. Harvest weight in tons (yield_weight and
-summary_stats.avg_yield_tons) is built in backend/yield_weight.py.
+Waste flags are built in backend/waste.py. Harvest weight in tons (yield_weight) is built in
+backend/yield_weight.py; summary_stats.avg_yield_tons is added by backend/summary.py.
 """
 
 from __future__ import annotations
@@ -94,7 +94,6 @@ from backend.schemas import (
     SimulateRequest,
     SimulateResponse,
     SummaryOut,
-    SummaryStatsOut,
 )
 
 # ---------------------------------------------------------------- location context
@@ -708,7 +707,6 @@ def build_response(bt: Backtest) -> SimulateResponse:
     weight_notes: dict[str, None] = {}
     weights = yield_weight.build_yield_weight(blocks, ctx, weight_notes)
     assumptions.extend(yield_weight.assumptions(weights, weight_notes))
-    stats = SummaryStatsOut(avg_yield_tons=yield_weight.avg_yield_tons(weights))
 
     return SimulateResponse(
         location=LocationOut(label=req.location.label, grid_cell=bt.grid_cell,
@@ -720,12 +718,12 @@ def build_response(bt: Backtest) -> SimulateResponse:
         waste_flags=waste.build_flags(bt),
         assumptions=assumptions,
         yield_weight=weights,
-        summary_stats=stats,
     )
 
 
 def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
-             context: dict | None = None) -> SimulateResponse:
+             context: dict | None = None, *,
+             include_comparisons: bool = True) -> SimulateResponse:
     """Run the backtest for a request.
 
     Weather is loaded from NASA POWER and the location context from
@@ -739,4 +737,9 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
     bt = run_backtest(request, wx)
     bt.context = ctx
     apply_money(bt, ctx)
-    return build_response(bt)
+    response = build_response(bt)
+    if include_comparisons:
+        from backend.comparisons import build_comparisons
+        response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
+    from backend import summary
+    return summary.add_to_response(response, request, ctx)

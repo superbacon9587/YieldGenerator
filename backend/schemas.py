@@ -96,6 +96,9 @@ class OptionalIn(_Strict):
     surface_water_share: float = Field(
         default=0.5, ge=0, le=1,
         description="Fraction of applied water from surface water; the rest is groundwater.")
+    budget_usd: float | None = Field(
+        default=None, ge=0,
+        description="Yearly operating budget in dollars. None means no budget.")
 
 
 class SimulateRequest(_Strict):
@@ -104,6 +107,10 @@ class SimulateRequest(_Strict):
     price_mode: PriceMode = "current"
     blocks: list[BlockIn] = Field(min_length=1)
     optional: OptionalIn = Field(default_factory=OptionalIn)
+    available_acres: float | None = Field(
+        default=None, gt=0,
+        description="Total land the farm has. Defaults to the sum of block acres when "
+                    "missing, so older clients still work.")
 
     @field_validator("years")
     @classmethod
@@ -120,6 +127,12 @@ class SimulateRequest(_Strict):
         dupes = sorted({i for i in ids if ids.count(i) > 1})
         if dupes:
             raise ValueError(f"block ids must be unique, repeated: {dupes}")
+        return self
+
+    @model_validator(mode="after")
+    def _default_available_acres(self) -> "SimulateRequest":
+        if self.available_acres is None:
+            self.available_acres = sum(b.acres for b in self.blocks)
         return self
 
 
@@ -206,10 +219,50 @@ class BlockYieldWeightOut(BaseModel):
     avg_tons_per_acre: float | None = Field(description="Mean of yearly tons_per_acre")
 
 
+class ComparisonSystem(BaseModel):
+    irrigation: Irrigation
+    start_month: int = Field(ge=1, le=12)
+    end_month: int = Field(ge=1, le=12)
+
+
+class ComparisonOut(BaseModel):
+    block_id: str
+    crop: Crop
+    kind: Literal["irrigation", "planting_window"]
+    current: ComparisonSystem
+    alternative: ComparisonSystem
+    avg_profit_change: float | None
+    avg_relative_yield_change_pts: float | None
+    avg_water_change_af: float | None
+    worst_year_profit_change: float | None
+    excludes: str
+
+
 class SummaryStatsOut(BaseModel):
+    """Whole-period numbers for the farm (backend/summary.py)."""
+    years_count: int
+    total_profit: float | None = Field(description="Sum over years that have profit")
+    avg_profit: float | None
+    avg_relative_yield: float | None = Field(description="Mean of the area-weighted farm values")
+    avg_water_applied_af: float | None
+    avg_cost: float | None
     avg_yield_tons: float | None = Field(
         default=None,
         description="Average over years of the total harvest weight of all blocks, US tons")
+
+
+class BudgetOut(BaseModel):
+    budget_usd: float | None
+    years_over_budget: list[int] = Field(description="Years where total farm cost > budget")
+    max_overrun_usd: float | None = Field(description="Largest cost minus budget; None if never over")
+
+
+class LandOut(BaseModel):
+    available_acres: float
+    peak_acres_in_use: float
+    peak_month: str = Field(description='Month name, for example "Jun"')
+    over_capacity_months: list[str] = Field(
+        description="Months where acres in the ground exceed available_acres")
 
 
 class SimulateResponse(BaseModel):
@@ -219,10 +272,13 @@ class SimulateResponse(BaseModel):
     farm_totals: list[FarmYearOut]
     summary: SummaryOut
     waste_flags: list[WasteFlagOut]
+    comparisons: list[ComparisonOut] = Field(default_factory=list)
     assumptions: list[str]
+    summary_stats: SummaryStatsOut | None = None
+    budget: BudgetOut | None = None
+    land: LandOut | None = None
     yield_weight: list[BlockYieldWeightOut] = Field(
         default_factory=list, description="Harvest weight per block and year (Part C)")
-    summary_stats: SummaryStatsOut = Field(default_factory=SummaryStatsOut)
 
 
 # ---------------------------------------------------------------- location context
@@ -255,3 +311,49 @@ class LocationContext(BaseModel):
         description="Keyed by crop id. A crop can be missing when no data exists.")
     surface_water_price_per_af: float | None
     data_quality: list[str] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------- compare and meta
+
+RankedBy = Literal["avg_profit", "avg_relative_yield", "avg_water_applied_af", "total_profit"]
+MIN_COMPARE, MAX_COMPARE = 2, 6
+
+
+class CompareConfig(_Strict):
+    name: str = Field(min_length=1, max_length=80)
+    farm: SimulateRequest
+
+
+class CompareRequest(_Strict):
+    configs: list[CompareConfig]
+    ranked_by: RankedBy = "avg_profit"
+
+    @field_validator("configs")
+    @classmethod
+    def _count(cls, v: list[CompareConfig]) -> list[CompareConfig]:
+        if not MIN_COMPARE <= len(v) <= MAX_COMPARE:
+            raise ValueError(
+                f"Compare needs {MIN_COMPARE} to {MAX_COMPARE} setups, got {len(v)}.")
+        names = [c.name.strip() for c in v]
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        if dupes:
+            raise ValueError(f"Setup names must be unique, repeated: {dupes}")
+        return v
+
+
+class CompareResultOut(BaseModel):
+    name: str
+    summary_stats: SummaryStatsOut
+    budget: BudgetOut
+    rank: int = Field(description="1 is first by ranked_by; ties share a rank; missing values rank last")
+
+
+class CompareResponse(BaseModel):
+    results: list[CompareResultOut]
+    ranked_by: RankedBy
+
+
+class MetaResponse(BaseModel):
+    first_year: int
+    last_full_year: int
+    presets: list[int]

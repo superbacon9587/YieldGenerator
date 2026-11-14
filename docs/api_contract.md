@@ -1,6 +1,6 @@
 # Simulate API contract
 
-`POST /api/simulate` runs the backtest for one farm and returns yearly water use, relative yield, harvest weight, and money per block, plus farm totals, a summary, summary stats, and waste flags.
+`POST /api/simulate` runs the backtest for one farm and returns yearly water use, relative yield, harvest weight, and money per block, plus farm totals, a summary, summary stats, budget and land checks, system comparisons, and waste flags.
 
 The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code version of this document. A full sample response is in [example_response.json](example_response.json). Its numbers look realistic, but they were made up for the sample and do not come from the engine.
 
@@ -65,6 +65,8 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | `optional.water_available_af` | number or null | no | Cap on total farm water per year. Split across blocks in proportion to need, and crops run short when it binds |
 | `optional.water_applied_af` | number or null | no | What the farmer says they actually apply per year. Used for the `over_applied` waste flag |
 | `optional.surface_water_share` | 0 to 1 | no, default 0.5 | Share of applied water from surface water. The rest is pumped groundwater |
+| `optional.budget_usd` | number or null | no, default null | Yearly operating budget in dollars. `null` means no budget. Used for the `budget` check |
+| `available_acres` | number | yes for new clients | Total land the farm has, greater than 0. If missing, it defaults to the sum of block acres so older clients still work. Used for the `land` check |
 
 **Crop ids** (they match the `crop` column in `data/reference/prices/crop_prices.csv`):
 
@@ -121,7 +123,7 @@ Shortened here. See [example_response.json](example_response.json) for all 25 ye
       ],
       "avg_tons": 64.8, "avg_tons_per_acre": 4.32 }
   ],
-  "summary_stats": { "avg_yield_tons": 182.4 }
+  "summary_stats": { "years_count": 25, "avg_yield_tons": 182.4, "...": "see Part A" }
 }
 ```
 
@@ -193,12 +195,6 @@ A typical year shows the typical county harvest, drought years show less, and go
 
 Other code (scenario comparisons, the optimizer) should call `tons_per_acre_by_year(crop, location, relative_yields)` in `backend/yield_weight.py` so every part of the app uses the same conversion.
 
-### `summary_stats`
-
-| Field | Type | Notes |
-|---|---|---|
-| `avg_yield_tons` | number or null | Average over years of the farm's total harvest weight in US tons. Each year adds up the blocks that have a weight (left-out blocks are named in `assumptions`). `null` when no block has a weight |
-
 ### `waste_flags[]`
 
 Sorted by `estimated_af_per_year`, largest first. Can be an empty list.
@@ -221,6 +217,97 @@ Sorted by `estimated_af_per_year`, largest first. Can be an empty list.
 ### `assumptions`
 
 A list of plain English strings. Includes the fixed model assumptions, the ranking used in `summary`, the price mode, and every `data_quality` note from the location context. Show all of them in the "Why this result?" panel.
+
+### Iteration 2 additions (Part A)
+
+Built by `backend/summary.py`. An older backend leaves these out, so the UI should handle them missing. Any value that cannot be computed is `null`, never 0. Part A's original `production` field was replaced by `yield_weight` (see above), so harvest amounts are always US tons.
+
+```json
+"summary_stats": { "years_count": 20, "total_profit": 1194836, "avg_profit": 59742,
+                   "avg_relative_yield": 0.983, "avg_water_applied_af": 226.8, "avg_cost": 150520,
+                   "avg_yield_tons": 182.4 },
+"budget": { "budget_usd": 160000, "years_over_budget": [], "max_overrun_usd": null },
+"land": { "available_acres": 60, "peak_acres_in_use": 55, "peak_month": "Jan",
+          "over_capacity_months": [] }
+```
+
+**`summary_stats`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `years_count` | int | Number of backtest years |
+| `total_profit` | number or null | Sum of `farm_totals[].profit` over years that have it |
+| `avg_profit` | number or null | Mean of the same years |
+| `avg_relative_yield` | number or null | Mean of the yearly area-weighted farm values |
+| `avg_water_applied_af` | number or null | Mean yearly farm water applied |
+| `avg_cost` | number or null | Mean of `farm_totals[].cost` over years that have it |
+| `avg_yield_tons` | number or null | Average over years of the farm's total harvest weight in US tons, from `yield_weight`. Each year adds up the blocks that have a weight (left-out blocks are named in `assumptions`). `null` when no block has a weight |
+
+When some years have no profit, the profit fields use only the years that do, and `assumptions` says how many.
+
+**`budget`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `budget_usd` | number or null | Echoes `optional.budget_usd` |
+| `years_over_budget` | int list | Years where farm cost was above the budget. Empty when there is no budget |
+| `max_overrun_usd` | number or null | The largest cost minus budget. `null` when no year is over |
+
+Farm cost only includes blocks with price data. If a block has no production cost, `assumptions` notes that the real total may be higher.
+
+**`land`**
+
+| Field | Type | Notes |
+|---|---|---|
+| `available_acres` | number | From the request, or the sum of block acres |
+| `peak_acres_in_use` | number | The most acres in the ground in any one month |
+| `peak_month` | string | `"Jan"` to `"Dec"`, the first month that reaches the peak |
+| `over_capacity_months` | string list | Months where acres in the ground exceed `available_acres` |
+
+For each month, the acres of every block growing that month are added up (Nov to Apr wraps the new year). A winter crop and a summer crop on the same acres never overlap. Over-capacity months add an `assumptions` note, and the backtest still runs as entered.
+
+## GET /api/meta
+
+The backtest year range and the period presets that fit inside it. No request body.
+
+```json
+{ "first_year": 1985, "last_full_year": 2025, "presets": [5, 10, 20, 30, 40] }
+```
+
+`first_year` is 1985: NASA POWER data starts in 1984, and a season that wraps the new year needs the previous year. `last_full_year` is December 31 of last year. Presets longer than the available history are dropped.
+
+## POST /api/compare
+
+Runs 2 to 6 saved setups through the same engine and ranks them.
+
+```json
+{
+  "configs": [
+    { "name": "Today", "farm": { "...same shape as a /api/simulate request..." } },
+    { "name": "All drip", "farm": { "..." } }
+  ],
+  "ranked_by": "avg_profit"
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `configs` | list of `{name, farm}` | 2 to 6 setups. Names must be unique. `farm` is a full `/api/simulate` request |
+| `ranked_by` | string | `"avg_profit"` (default), `"total_profit"`, `"avg_relative_yield"`, or `"avg_water_applied_af"`. Higher is first, except water, where lower is first |
+
+Response:
+
+```json
+{
+  "results": [
+    { "name": "All drip", "summary_stats": { "..." }, "budget": { "..." }, "rank": 1 },
+    { "name": "Today", "summary_stats": { "..." }, "budget": { "..." }, "rank": 2 }
+  ],
+  "ranked_by": "avg_profit"
+}
+```
+
+Results come back in rank order. Equal values share a rank (1, 2, 2, 4), and a setup with a `null` ranking value ranks after every setup that has one. A wrong number of setups, a repeated name, or an unknown `ranked_by` gets a `422` with a clear message.
 
 ## Location context
 
@@ -262,3 +349,35 @@ The Pydantic model `LocationContext` in `backend/schemas.py` describes this shap
 | `data_quality` | string list | Notes the engine copies into the response `assumptions` |
 
 A crop can be missing from `baseline_yields` or `production_costs` when no data exists anywhere. The engine then still returns water and relative yield for that crop, sets its revenue, cost, and profit to `null`, and adds a note to `assumptions`. The numbers above only show the shape.
+
+## System comparisons (Part B, iteration 2)
+
+The response now includes `comparisons` (an empty list when no alternatives can be evaluated). Existing fields remain unchanged. Each item has:
+
+```json
+{
+  "block_id": "b3",
+  "crop": "corn",
+  "kind": "irrigation",
+  "current": {"irrigation": "flood", "start_month": 5, "end_month": 9},
+  "alternative": {"irrigation": "drip", "start_month": 5, "end_month": 9},
+  "avg_profit_change": 1189,
+  "avg_relative_yield_change_pts": 0.4,
+  "avg_water_change_af": -20.5,
+  "worst_year_profit_change": 2100,
+  "excludes": "Installation cost of the new system is not included."
+}
+```
+
+Numbers above illustrate the shape; they are not measured results.
+
+- Each alternative changes exactly one entry, retaining its acres, crop, location, years, price mode, and optional inputs. With a water cap, the whole farm is simulated using the existing engine and the same weather/context, with nested comparisons disabled. Without a cap, entries are independent, so only the changed entry is simulated at its actual acreage; tests confirm it matches a full-farm rerun.
+- Metrics describe the **changed crop entry**, not total farm differences. Farm water allocation is recalculated, so other entries can also change under a water cap; the exclusion note explicitly flags this. Profit and water changes are alternative minus current. Relative yield change is in **percentage points**, not harvested weight. Worst-year change is the alternative's minimum profit minus the current minimum; these minima may occur in different years.
+- Financial differences are null unless profit is available for that entry in both setups in every compared year. Null means unavailable, never zero. The UI can display `No price data`.
+- Within each block, rows are ordered by average profit change descending, with nulls last. This is ordering, not advice or a suitability ranking.
+- Irrigation alternatives include each other API irrigation type. Installation costs are excluded.
+- Annual planting alternatives use only `planting_months` already present in crop reference data, accepting either a list or the existing `{value, source, verify}` format. The end month shifts by the same number of months, wrapping December. No dates are invented when the list is missing. Perennials get no planting-window comparisons. Market timing and field operations are excluded.
+- Alternatives requiring weather outside the available record are omitted, with an explanation in `assumptions`.
+- Budget checks are not added by this feature. The current engine does not yet accept Part A's yearly budget field; once added, comparison requests preserve it along with the other farm inputs.
+- Internal callers such as the optimizer can use `simulate(..., include_comparisons=False)` to avoid generating nested alternatives. The public endpoint includes comparisons by default.
+- No new endpoint is needed: `POST /api/simulate` includes the comparisons. This change does not alter the frontend or add absolute harvest quantities (those are in `yield_weight`).
