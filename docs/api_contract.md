@@ -79,6 +79,17 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | `corn` | Corn | no |
 | `oats` | Oats | no |
 
+**Planting windows** (`data/reference/crops.json`, read through `backend/reference.py`). Each annual has `planting_months`, the months (1 to 12) in which a Central Valley planting can start, and `season_days`, the days from planting to harvest. `season_days` is the sum of the crop's existing `stage_days`. Perennials have `planting_months: null` and are treated as year-round; they have no `season_days`. The planting months cite UC ANR or UC Davis publications and are all marked `verify: true` until checked against the text.
+
+| id | `planting_months` | `season_days` |
+|---|---|---|
+| `processing_tomatoes` | 2, 3, 4, 5 | 155 (35 + 40 + 50 + 30) |
+| `corn` | 3, 4, 5, 6 | 150 (30 + 40 + 50 + 30) |
+| `oats` | 10, 11, 12, 1 | 160 (20 + 50 + 60 + 30) |
+| `almonds`, `walnuts`, `alfalfa_hay` | null (year-round) | none |
+
+The simulation still stretches or shrinks `stage_days` to fit each block's start and end months; `season_days` does not change simulation results. Because the planting windows now exist, `POST /api/simulate` returns `planting_window` comparisons for annual entries (see System comparisons below).
+
 Unknown fields are rejected. A bad request gets FastAPI's standard `422` response, with a `detail` list naming each bad field.
 
 ## Response

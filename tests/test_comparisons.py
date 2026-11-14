@@ -24,7 +24,7 @@ def test_irrigation_coverage_sorting_missing_prices_and_immutability():
     before = request.model_dump()
     result = engine.simulate(request, wx=make_weather(), context=make_context())
     for block in request.blocks:
-        rows = [r for r in result.comparisons if r.block_id == block.id]
+        rows = [r for r in result.comparisons if r.block_id == block.id and r.kind == "irrigation"]
         assert {r.alternative.irrigation for r in rows} == {name.replace("-", "_") for name in reference.irrigation()} - {block.irrigation}
         values = [r.avg_profit_change for r in rows if r.avg_profit_change is not None]
         assert values == sorted(values, reverse=True)
@@ -41,6 +41,7 @@ def test_planting_windows_wrap_and_perennials(monkeypatch):
     entries = deepcopy(reference.crops())
     entries["oats"]["planting_months"] = {"value": [10, 11, 12], "source": "test only", "verify": True}
     entries["almonds"]["planting_months"] = [2]
+    entries["corn"]["planting_months"] = None  # isolate the oats wrap case
     monkeypatch.setattr(reference, "crops", lambda: entries)
     result = engine.simulate(farm(), wx=make_weather(), context=make_context())
     planting = [r for r in result.comparisons if r.kind == "planting_window"]
