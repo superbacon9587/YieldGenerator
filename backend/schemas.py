@@ -214,7 +214,7 @@ class ProductionCost(BaseModel):
 
 
 class LocationContext(BaseModel):
-    state: str
+    state: str | None = Field(description="Two-letter code; None outside the US")
     county: str | None
     in_california: bool
     cost_region: str | None

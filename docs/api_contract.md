@@ -19,7 +19,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 - **Months wrap around the new year.** `start_month: 11, end_month: 4` means November through April. `start_month: 1, end_month: 12` means year-round (use this for perennials).
 - **Season year.** A season that crosses the new year counts in the year it ends. Oats planted November 2014 and harvested April 2015 are the 2015 season.
 - **Weather data starts in 1984 and ends December 31 of last year.** A block that wraps the new year needs the previous year's weather, so its earliest season year is 1985. A range the weather does not cover gets a `422` error that names the available dates.
-- **Null money.** `revenue`, `cost`, and `profit` can be `null` when a crop has no baseline yield, price, or production cost for the location. Water and yield are still filled in. The UI should show "No price data", not $0. Farm totals are `null` for any year where a block's value is `null`.
+- **Null money.** `revenue`, `cost`, and `profit` can be `null` when a crop has no baseline yield, price, or production cost for the location. Water and yield are still filled in. The UI should show "No price data", not $0. Farm money totals add up only the blocks that have money, and `assumptions` names any block left out. A farm money total is `null` only when no block has money that year.
 
 ## Request
 
@@ -144,13 +144,13 @@ One entry per season year, in the same order as `years`.
 
 ### `farm_totals[]`
 
-One entry per year. `water_applied_af` and money are sums over blocks. `relative_yield` is the acre-weighted mean of the block values. A money field is `null` if any block's value is `null` that year.
+One entry per year. `water_applied_af` and money are sums over blocks. `relative_yield` is the acre-weighted mean of the block values. Money sums only the blocks whose money is not `null` (the left-out blocks are named in `assumptions`), and is `null` only when no block has money that year.
 
 ### `summary`
 
 | Field | Type | Notes |
 |---|---|---|
-| `best_year` | int | Highest farm profit. Falls back to relative yield when profit is `null`. The ranking used is stated in `assumptions` |
+| `best_year` | int | Highest farm profit. Falls back to farm relative yield when any year's farm profit is `null`. The ranking used is stated in `assumptions` |
 | `worst_year` | int | Lowest by the same ranking |
 | `typical_year` | int | Median year by the same ranking |
 | `drought_years` | int list | Known California drought years (2014, 2015, 2021, 2022) that fall in the requested range. Can be empty |
@@ -161,7 +161,7 @@ Sorted by `estimated_af_per_year`, largest first. Can be an empty list.
 
 | Field | Type | Notes |
 |---|---|---|
-| `block_id` | string | Which block |
+| `block_id` | string | Which block. `"farm"` for the farm-wide `over_applied` flag |
 | `type` | string | One of the four types below |
 | `message` | string | Plain English. Show it to the farmer as is |
 | `estimated_af_per_year` | number | Average water that could be saved per year |
@@ -170,7 +170,7 @@ Sorted by `estimated_af_per_year`, largest first. Can be an empty list.
 | `type` | When it fires |
 |---|---|
 | `irrigation_method` | The block's irrigation method loses more water than drip would for the same crop |
-| `over_applied` | `optional.water_applied_af` is set and above the modeled need |
+| `over_applied` | `optional.water_applied_af` is set and more than 5 percent above the modeled gross need for the whole farm. `block_id` is `"farm"` |
 | `rain_covered` | Water was applied in weeks where rain already covered the crop's needs |
 | `low_holding_soil` | A high water use crop is on sand |
 
@@ -208,7 +208,7 @@ The Pydantic model `LocationContext` in `backend/schemas.py` describes this shap
 
 | Field | Type | Notes |
 |---|---|---|
-| `state` | string | Two-letter state code |
+| `state` | string or null | Two-letter state code. `null` outside the US |
 | `county` | string or null | |
 | `in_california` | bool | |
 | `cost_region` | string or null | UC Davis cost study region |

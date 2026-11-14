@@ -29,3 +29,42 @@ def make_weather(start="1999-01-01", end="2005-12-31", tmax_peak=34.0, et0_peak=
 @pytest.fixture
 def weather():
     return make_weather()
+
+
+def make_context(**overrides):
+    """A get_location_context result shaped like Merced, with no network.
+
+    corn uses a statewide baseline and oats has no production cost, so both
+    fallback paths are exercised.
+    """
+    ctx = {
+        "state": "CA",
+        "county": "Merced",
+        "in_california": True,
+        "cost_region": "San Joaquin Valley North",
+        "baseline_yields": {
+            "almonds": {"value": 2000.0, "unit": "LB / ACRE", "basis": "county", "source": "test"},
+            "walnuts": {"value": 1.9, "unit": "TONS / ACRE", "basis": "county", "source": "test"},
+            "corn": {"value": 160.0, "unit": "BU / ACRE", "basis": "state", "source": "test"},
+            "oats": {"value": 80.0, "unit": "BU / ACRE", "basis": "county", "source": "test"},
+        },
+        "production_costs": {
+            "almonds": {"cost_excl_water": 3000.0, "unit": "$ / ACRE",
+                        "region": "San Joaquin Valley North", "source": "test"},
+            "walnuts": {"cost_excl_water": 2800.0, "unit": "$ / ACRE",
+                        "region": "San Joaquin Valley North", "source": "test"},
+            "corn": {"cost_excl_water": 950.0, "unit": "$ / ACRE",
+                     "region": "San Joaquin Valley North", "source": "test"},
+        },
+        "surface_water_price_per_af": 50.0,
+        "data_quality": ["Corn yield uses the statewide median (no county data for Merced)."],
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+@pytest.fixture(autouse=True)
+def fake_location_context(monkeypatch):
+    """Keep every test off the Census geocoder; tests can still pass context= directly."""
+    from backend import simulate
+    monkeypatch.setattr(simulate, "get_location_context", lambda lat, lon: make_context())

@@ -7,6 +7,7 @@ Endpoints:
     GET /api/geocode?q=...          list of {label, lat, lon}
     GET /api/weather?lat=..&lon=..  cached daily POWER data plus FAO-56 ET0
     GET /api/context?lat=..&lon=..  county, cost region, baseline yields, costs, water price
+    POST /api/simulate              farm backtest (docs/api_contract.md)
 """
 
 from __future__ import annotations
@@ -15,12 +16,23 @@ import math
 
 import requests
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 
 from backend import geocode as geocode_mod
 from backend import power_client, regions
+from backend import simulate as simulate_mod
 from backend.et0 import et0_fao56
+from backend.schemas import SimulateRequest, SimulateResponse
 
 app = FastAPI(title="YieldGenerator API")
+
+# The Vite dev server runs on 5173; allow it to call the API directly.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 def _clean(values) -> list:
@@ -72,3 +84,14 @@ def context(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-
         return regions.get_location_context(lat, lon)
     except requests.RequestException as exc:
         raise HTTPException(status_code=502, detail=f"Census Geocoder error: {exc}") from exc
+
+
+@app.post("/api/simulate", response_model=SimulateResponse)
+def simulate(req: SimulateRequest) -> SimulateResponse:
+    """Backtest a farm over the requested years. Contract: docs/api_contract.md."""
+    try:
+        return simulate_mod.simulate(req)
+    except simulate_mod.WeatherUnavailableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Data service error: {exc}") from exc

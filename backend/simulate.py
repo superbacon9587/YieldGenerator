@@ -54,31 +54,102 @@ Method, per block and per season year:
  9. Growing degree days. Simple average method, sum of max(0, (Tmax + Tmin)/2 -
     gdd_base_c) over active days, no upper cutoff.
 
-Money (revenue, cost, profit) and waste flags are added in a later step; until
-then they are null and empty.
+Money, per block and season year (backend/economics.py helpers):
+    revenue = relative_yield x baseline_yield x acres x crop price
+    cost    = cost_excl_water x acres + surface water cost + groundwater pumping cost
+Baseline yields, production costs, and the surface water price come only from
+get_location_context(lat, lon) (backend/regions.py, Marco's). Applied water is
+split into surface water (optional.surface_water_share) priced at the context's
+surface_water_price_per_af, and groundwater priced with the pumping cost
+function (well lift and pump efficiency from defaults.json, electricity from
+utilities.csv). A block with no baseline yield, crop price, or production cost
+gets null revenue, cost, and profit, and a note in assumptions.
+
+Waste flags are built in backend/waste.py.
 """
 
 from __future__ import annotations
 
 import calendar
+import csv
 import datetime as dt
+import json
 from dataclasses import dataclass, field
+from functools import cache
+from statistics import median
 
 import numpy as np
 import pandas as pd
 
-from backend import reference
+from backend import economics, reference, waste
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
     BlockOut,
     BlockYearOut,
     FarmYearOut,
+    LocationContext,
     LocationOut,
     SimulateRequest,
     SimulateResponse,
     SummaryOut,
 )
+
+# ---------------------------------------------------------------- location context
+
+FALLBACK_NOTE = "Using Merced defaults until the California data layer is merged."
+
+
+def _fallback_location_context(lat: float, lon: float) -> dict:
+    """Merced-only stand-in for backend.regions.get_location_context, same shape.
+
+    Used only when backend/regions.py is not importable. Baseline yields are the
+    median of data/validation/merced_yields.csv, costs come from
+    production_costs.csv (San Joaquin Valley North when present, else the latest
+    study), and the water price from defaults.json.
+    """
+    data = reference.REFERENCE_DIR.parent
+    yields: dict[str, list[tuple[float, str]]] = {}
+    with (data / "validation" / "merced_yields.csv").open(newline="") as f:
+        for r in csv.DictReader(f):
+            if r["yield"]:
+                yields.setdefault(r["crop"], []).append((float(r["yield"]), r["unit"]))
+    baseline = {
+        crop: {"value": median(v for v, _ in rows), "unit": rows[0][1], "basis": "county",
+               "source": f"NASS Merced County median, {len(rows)} years"}
+        for crop, rows in yields.items()
+    }
+    costs: dict[str, dict] = {}
+    with (economics.PRICES_DIR / "production_costs.csv").open(newline="") as f:
+        for r in csv.DictReader(f):
+            if not r["cost_excl_water"] or "organic" in r["region"].lower():
+                continue
+            prev = costs.get(r["crop"])
+            sjv = r["region"] == "San Joaquin Valley North"
+            if prev is None or (sjv and prev["region"] != r["region"]) or (
+                    prev["region"] != "San Joaquin Valley North"
+                    and int(r["study_year"]) > int(prev["_year"])):
+                costs[r["crop"]] = {"cost_excl_water": float(r["cost_excl_water"]),
+                                    "unit": "$ / ACRE", "region": r["region"],
+                                    "source": f"UC Davis cost study {r['source']}",
+                                    "_year": r["study_year"]}
+    for c in costs.values():
+        c.pop("_year")
+    water = json.loads((economics.PRICES_DIR / "defaults.json").read_text())
+    return {
+        "state": "CA", "county": "Merced", "in_california": True,
+        "cost_region": "San Joaquin Valley North",
+        "baseline_yields": baseline,
+        "production_costs": costs,
+        "surface_water_price_per_af": water["surface_water_price_per_af"]["value"],
+        "data_quality": [FALLBACK_NOTE],
+    }
+
+
+try:
+    from backend.regions import get_location_context
+except ImportError:  # Marco's module not merged yet
+    get_location_context = _fallback_location_context
 
 # ---------------------------------------------------------------- constants
 
@@ -239,6 +310,7 @@ class WaterBalance:
     """Daily arrays for one season, all in mm except ks."""
     etc: np.ndarray
     eta: np.ndarray
+    rain_in: np.ndarray         # effective rain reaching the soil, before the capacity limit
     rain_eff: np.ndarray        # effective rain actually stored in the root zone
     irrigation_net: np.ndarray
     depletion: np.ndarray       # end of day root zone depletion
@@ -278,7 +350,7 @@ def water_balance(et0: np.ndarray, precip: np.ndarray, kc: np.ndarray, active: n
             remaining -= amount
             irr[i] = amount
         eta[i], rain_eff[i], dep[i], ks_out[i] = a, stored, dr, ks
-    return WaterBalance(etc, eta, rain_eff, irr, dep, ks_out)
+    return WaterBalance(etc, eta, pe_in, rain_eff, irr, dep, ks_out)
 
 
 # ---------------------------------------------------------------- one block, one season
@@ -302,6 +374,14 @@ class BlockSeason:
     heat_stress_days: int
     gdd: float
     capped: bool = False
+    revenue: float | None = None
+    cost: float | None = None
+
+    @property
+    def profit(self) -> float | None:
+        if self.revenue is None or self.cost is None:
+            return None
+        return self.revenue - self.cost
 
     @property
     def irrigation_need_af(self) -> float:
@@ -414,6 +494,9 @@ class Backtest:
     grid_cell: tuple[float, float]
     seasons: dict[str, dict[int, BlockSeason]]       # block id -> year -> season
     assumptions: list[str] = field(default_factory=list)
+    context: dict = field(default_factory=dict)      # get_location_context output
+    water_cost_per_af: dict[int, float | None] = field(default_factory=dict)
+    money_notes: list[str] = field(default_factory=list)
 
 
 def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
@@ -456,6 +539,101 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
     return Backtest(request, years, grid, seasons, assumptions)
 
 
+# ---------------------------------------------------------------- money
+
+ELECTRICITY_SERIES = "electricity_commercial"
+
+
+@cache
+def _price_tables():
+    return (economics.load_crop_prices(), economics.load_utility_prices(),
+            economics.load_defaults())
+
+
+def _lookup_price(table: economics.PriceTable, key: str, year: int, mode: str,
+                  notes: dict, label: str) -> economics.Price | None:
+    """Price for the year. In historical mode a missing year uses the nearest year."""
+    try:
+        return table.get(key, year, mode)
+    except economics.PriceNotFoundError:
+        if mode != "historical":
+            return None
+    for gap in range(1, 60):
+        for y in (year - gap, year + gap):
+            try:
+                price = table.get(key, y, "historical")
+            except economics.PriceNotFoundError:
+                continue
+            notes[f"Some years have no {label} price, so the nearest year's price is used."] = None
+            return price
+    return None
+
+
+def apply_money(bt: Backtest, ctx: dict) -> None:
+    """Fill revenue and cost on every season, and water cost per acre-ft per year."""
+    req = bt.request
+    crop_prices, utilities, defaults = _price_tables()
+    mode = req.price_mode
+    share = req.optional.surface_water_share
+    sw_price = ctx.get("surface_water_price_per_af")
+    lift, pump_eff = defaults["well_lift_ft"], defaults["pump_efficiency"]
+    notes: dict[str, None] = {}  # ordered set
+
+    pump_cost: dict[int, float | None] = {}
+    for y in bt.years:
+        elec = _lookup_price(utilities, ELECTRICITY_SERIES, y, mode, notes, "electricity")
+        pump_cost[y] = (economics.pumping_cost_per_af(lift, pump_eff, elec.value, elec.unit)
+                        if elec else None)
+        sw_part = share * sw_price if sw_price is not None else (0.0 if share == 0 else None)
+        gw_part = (1 - share) * pump_cost[y] if pump_cost[y] is not None else (
+            0.0 if share == 1 else None)
+        bt.water_cost_per_af[y] = (sw_part + gw_part
+                                   if sw_part is not None and gw_part is not None else None)
+
+    for b in req.blocks:
+        label = b.crop.replace("_", " ")
+        base = ctx["baseline_yields"].get(b.crop)
+        prod = ctx["production_costs"].get(b.crop)
+        missing: dict[str, None] = {}
+        if base is None:
+            missing["baseline yield"] = None
+        if prod is None:
+            missing["production cost"] = None
+        for y, s in bt.seasons[b.id].items():
+            price = _lookup_price(crop_prices, b.crop, y, mode, notes, label)
+            if price is None:
+                missing["crop price"] = None
+            if bt.water_cost_per_af[y] is None:
+                missing["water price"] = None
+            if price is None or base is None or prod is None or bt.water_cost_per_af[y] is None:
+                s.revenue = s.cost = None
+                continue
+            per_acre = economics.convert_quantity(base["value"], base["unit"], price.unit, b.crop)
+            s.revenue = s.relative_yield * per_acre * b.acres * price.value
+            s.cost = (prod["cost_excl_water"] * b.acres
+                      + s.water_applied_af * bt.water_cost_per_af[y])
+        if missing:
+            notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
+                  "cost, and profit are shown as no data."] = None
+
+    if mode == "current":
+        notes["Prices: the latest USDA NASS price for each crop is used for every year."] = None
+    else:
+        notes["Prices: each year uses that year's USDA NASS price."] = None
+    last = bt.years[-1]
+    if sw_price is not None and pump_cost.get(last) is not None:
+        notes[f"Applied water is {share:.0%} surface water at ${sw_price:,.0f} per acre-ft and "
+              f"{1 - share:.0%} groundwater pumped from {lift:g} ft (about "
+              f"${pump_cost[last]:,.0f} per acre-ft in {last})."] = None
+    bt.money_notes = list(notes)
+
+
+# ---------------------------------------------------------------- response
+
+def _money(x: float | None) -> float | None:
+    return None if x is None else round(x)
+
+
 def _block_year_out(s: BlockSeason) -> BlockYearOut:
     return BlockYearOut(
         year=s.year,
@@ -466,7 +644,7 @@ def _block_year_out(s: BlockSeason) -> BlockYearOut:
         relative_yield=round(s.relative_yield, 3),
         heat_stress_days=s.heat_stress_days,
         gdd=round(s.gdd),
-        revenue=None, cost=None, profit=None,
+        revenue=_money(s.revenue), cost=_money(s.cost), profit=_money(s.profit),
     )
 
 
@@ -486,8 +664,13 @@ def summarize(years: list[int], farm: list[FarmYearOut]) -> tuple[SummaryOut, st
     ), metric
 
 
+def _sum_or_none(values: list[float | None]) -> float | None:
+    present = [v for v in values if v is not None]
+    return round(sum(present)) if present else None
+
+
 def build_response(bt: Backtest) -> SimulateResponse:
-    req = bt.request
+    req, ctx = bt.request, bt.context
     blocks = [
         BlockOut(id=b.id, crop=b.crop, acres=b.acres, irrigation=b.irrigation,
                  yearly=[_block_year_out(bt.seasons[b.id][y]) for y in bt.years])
@@ -495,28 +678,55 @@ def build_response(bt: Backtest) -> SimulateResponse:
     ]
     total_acres = sum(b.acres for b in req.blocks)
     farm = []
+    left_out: dict[str, None] = {}
     for y in bt.years:
         ss = [bt.seasons[b.id][y] for b in req.blocks]
+        with_money = [s for s in ss if s.profit is not None]
+        if with_money:
+            for s in ss:
+                if s.profit is None:
+                    left_out[f"{s.block_id} ({s.crop.replace('_', ' ')})"] = None
         farm.append(FarmYearOut(
             year=y,
             water_applied_af=round(sum(s.water_applied_af for s in ss), 1),
             relative_yield=round(sum(s.relative_yield * s.acres for s in ss) / total_acres, 3),
-            revenue=None, cost=None, profit=None,
+            revenue=_sum_or_none([s.revenue for s in with_money]),
+            cost=_sum_or_none([s.cost for s in with_money]),
+            profit=_sum_or_none([s.profit for s in with_money]),
         ))
     summary, metric = summarize(bt.years, farm)
+
+    assumptions = list(bt.assumptions) + list(ctx.get("data_quality", [])) + bt.money_notes
+    if left_out:
+        assumptions.append("Farm dollar totals only add up blocks with price data (left out: "
+                           + ", ".join(left_out) + ").")
+    assumptions.append(f"Best, worst, and typical years are ranked by {metric}.")
+
     return SimulateResponse(
-        location=LocationOut(label=req.location.label, grid_cell=bt.grid_cell),
+        location=LocationOut(label=req.location.label, grid_cell=bt.grid_cell,
+                             county=ctx.get("county"), cost_region=ctx.get("cost_region")),
         years=bt.years,
         blocks=blocks,
         farm_totals=farm,
         summary=summary,
-        waste_flags=[],
-        assumptions=bt.assumptions + [f"Best, worst, and typical years are ranked by {metric}."],
+        waste_flags=waste.build_flags(bt),
+        assumptions=assumptions,
     )
 
 
-def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None) -> SimulateResponse:
-    """Run the backtest for a request. Weather is loaded from NASA POWER if not given."""
+def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
+             context: dict | None = None) -> SimulateResponse:
+    """Run the backtest for a request.
+
+    Weather is loaded from NASA POWER and the location context from
+    get_location_context when they are not passed in.
+    """
     if wx is None:
         wx = load_weather(request.location.lat, request.location.lon)
-    return build_response(run_backtest(request, wx))
+    if context is None:
+        context = get_location_context(request.location.lat, request.location.lon)
+    ctx = LocationContext.model_validate(context).model_dump()
+    bt = run_backtest(request, wx)
+    bt.context = ctx
+    apply_money(bt, ctx)
+    return build_response(bt)
