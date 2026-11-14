@@ -15,11 +15,52 @@
     "unit": "$/acre-ft",
     "verify": false,
     "drought_year_value": 100,
-    "source": "Merced Irrigation District 2024 rate ($50/af); 2022 drought rate was $100/af"
+    "source": "Merced Irrigation District 2024 rate ($50/af); 2022 drought rate was $100/af",
+    "by_region": {
+      "_note": "Typical agricultural surface water price per acre-foot by cost region. Rates vary a lot by district and water year; each value is a starting point for the user to adjust. Merced County itself uses the top level 'value' (Merced Irrigation District).",
+      "Sacramento Valley": {
+        "value": 18,
+        "verify": true,
+        "source": "Glenn-Colusa Irrigation District 2024 rate sheet: $44.05 per acre fixed plus $9.05/af volumetric (https://www.gcid.net/wp-content/uploads/2024/09/2024-Water-Rate-Sheet.pdf). About $18/af at 5 af/acre applied."
+      },
+      "San Joaquin Valley North": {
+        "value": 50,
+        "verify": true,
+        "source": "Merced Irrigation District 2024 rate ($50/af), same as the Merced value."
+      },
+      "San Joaquin Valley South": {
+        "value": 150,
+        "verify": true,
+        "source": "Westlands Water District 2024-25 contract water rate, Areas 1 and 3, adopted June 18, 2024: $150.29/af (https://wwd.ca.gov/water-management/water-rates/). Friant and Kern districts differ."
+      },
+      "Central Coast": {
+        "value": 392,
+        "verify": true,
+        "source": "Pajaro Valley Water Management Agency delivered water charge, 2024-25: $392/af, rising to $501/af on July 1, 2025 (https://pajaronian.com/pv-water-board-approves-rate-increase/). Most Central Coast farms pump groundwater instead."
+      },
+      "Southern California": {
+        "value": 20,
+        "verify": true,
+        "source": "Imperial Irrigation District agricultural rate, $20/af, unchanged since 2011 (https://legal-planet.org/2025/12/19/eliminate-the-imperial-irrigation-district/). Coastal Southern California (Ventura, San Diego) ag water costs far more."
+      },
+      "North Coast": {
+        "value": 100,
+        "verify": true,
+        "source": "No district rate found. Team estimate; most North Coast farms use wells, ponds, or recycled water."
+      },
+      "Mountain": {
+        "value": 50,
+        "verify": true,
+        "source": "No district rate found. Team estimate for intermountain and foothill irrigation districts."
+      }
+    }
   },
   "price_mode": {
     "value": "current",
-    "allowed": ["current", "historical"],
+    "allowed": [
+      "current",
+      "historical"
+    ],
     "verify": false,
     "note": "current: latest available price applied to every year. historical: each year's own price."
   }
