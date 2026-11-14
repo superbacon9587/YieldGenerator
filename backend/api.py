@@ -10,6 +10,7 @@ Endpoints:
     POST /api/simulate              farm backtest (docs/api_contract.md)
     GET /api/meta                   first and last backtest years, period presets
     POST /api/compare               rank 2 to 6 saved farm setups
+    POST /api/optimize              best crop plan within land, budget, and water
 """
 
 from __future__ import annotations
@@ -129,6 +130,23 @@ def compare(req: CompareRequest) -> CompareResponse:
     """Run 2 to 6 farm setups and rank them by one summary number."""
     try:
         return compare_mod.compare(req)
+    except simulate_mod.WeatherUnavailableError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Data service error: {exc}") from exc
+
+
+# ---------------------------------------------------------------- optimize (Part C, iteration 2)
+
+from backend import optimize as optimize_mod  # noqa: E402
+from backend.schemas import OptimizeRequest, OptimizeResponse  # noqa: E402
+
+
+@app.post("/api/optimize", response_model=OptimizeResponse)
+def optimize(req: OptimizeRequest) -> OptimizeResponse:
+    """Best crop plan for the farm's land, budget, and water. Contract: docs/api_contract.md."""
+    try:
+        return optimize_mod.optimize(req)
     except simulate_mod.WeatherUnavailableError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except requests.RequestException as exc:

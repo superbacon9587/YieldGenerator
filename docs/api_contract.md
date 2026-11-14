@@ -392,3 +392,113 @@ Numbers above illustrate the shape; they are not measured results.
 - Budget checks are not added by this feature. The current engine does not yet accept Part A's yearly budget field; once added, comparison requests preserve it along with the other farm inputs.
 - Internal callers such as the optimizer can use `simulate(..., include_comparisons=False)` to avoid generating nested alternatives. The public endpoint includes comparisons by default.
 - No new endpoint is needed: `POST /api/simulate` includes the comparisons. This change does not alter the frontend or add absolute harvest quantities (those are in `yield_weight`).
+
+## POST /api/optimize (Part C, iteration 2)
+
+Finds the crop plan that scores highest on one objective within the farm's land, budget, and water. Logic is in `backend/optimize.py`; models are `OptimizeRequest` and `OptimizeResponse` in `backend/schemas.py`.
+
+### Request
+
+```json
+{
+  "location": { "lat": 37.30, "lon": -120.48, "label": "Merced, CA" },
+  "years": [2005, 2024],
+  "price_mode": "current",
+  "available_acres": 160,
+  "budget_usd": 400000,
+  "budget_rule": "every_year",
+  "water_available_af": 450,
+  "objective": "profit",
+  "allowed_crops": null,
+  "allowed_irrigation": null,
+  "allow_new_perennials": false,
+  "max_share_per_crop": 0.7,
+  "min_block_acres": 5,
+  "soil": "loam",
+  "current_farm": { "blocks": [
+    { "id": "b1", "crop": "almonds", "acres": 80, "irrigation": "micro_sprinkler",
+      "start_month": 1, "end_month": 12 },
+    { "id": "b3", "crop": "corn", "acres": 60, "irrigation": "flood",
+      "start_month": 5, "end_month": 9 }
+  ] }
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `location`, `years`, `price_mode` | | same as `/api/simulate` | |
+| `available_acres` | number > 0 | yes | Land the plan can use in any one month |
+| `budget_usd` | number >= 0 | yes | Yearly operating budget in dollars |
+| `budget_rule` | `"every_year"` or `"average"` | no, default `"every_year"` | `every_year`: farm cost at or under the budget in every backtest year. `average`: average yearly cost at or under the budget; single years can go over |
+| `water_available_af` | number or null | no | Farm water limit per year, acre-ft. The plan's full irrigation must fit under it in every year |
+| `objective` | `"profit"`, `"production_value"`, `"profit_per_af"` | no, default `"profit"` | Average yearly profit; average yearly revenue at current prices (whatever `price_mode` is, so crops are compared by value, never by raw tons); or average profit divided by average water applied |
+| `allowed_crops` | crop id list or null | no, default all | At least one when given |
+| `allowed_irrigation` | irrigation list or null | no, default all | At least one when given |
+| `allow_new_perennials` | bool | no, default false | When false, each perennial (almonds, walnuts, alfalfa) keeps exactly its `current_farm` acres (rounded to 0.1 acre); its irrigation type can change. Perennials the current farm does not grow are not planted |
+| `max_share_per_crop` | number, 0 < x <= 1 | no, default 0.7 | Each crop's acres (all its blocks) at most this share of `available_acres` |
+| `min_block_acres` | number >= 0 | no, default 5 | Each block in the plan is at least this big |
+| `soil` | `"sand"`, `"loam"`, `"clay"` | no, default `"loam"` | |
+| `current_farm` | `{blocks}` or null | no | The farm today, same block shape as `/api/simulate`. It sets the locked perennial acres and is evaluated with the request's location, years, price mode, soil, budget, and water limit |
+
+Surface water share uses the `/api/simulate` default (0.5). Unknown fields, a missing `available_acres` or `budget_usd`, and out of range values get a `422`.
+
+### Response
+
+```json
+{
+  "status": "optimal",
+  "objective": "profit",
+  "plan": {
+    "blocks": [
+      { "id": "p1", "crop": "almonds", "acres": 80.0, "irrigation": "drip",
+        "start_month": 1, "end_month": 12, "avg_profit": 134626, "avg_yield_tons": 77.59 },
+      { "id": "p2", "crop": "processing_tomatoes", "acres": 39.3, "irrigation": "drip",
+        "start_month": 2, "end_month": 6, "avg_profit": 105626, "avg_yield_tons": 1874.55 }
+    ],
+    "summary_stats": { "years_count": 20, "avg_profit": 240251, "avg_yield_tons": 1952.14, "...": "..." },
+    "budget": { "budget_usd": 400000, "years_over_budget": [], "max_overrun_usd": null },
+    "land": { "available_acres": 160, "peak_acres_in_use": 119.3, "peak_month": "Feb",
+              "over_capacity_months": [] }
+  },
+  "current_farm": { "blocks": ["..."], "summary_stats": { "...": "..." }, "budget": { "...": "..." } },
+  "difference_vs_current": { "avg_profit": 169933, "avg_yield_tons": 1548.51,
+                             "avg_water_applied_af": -72.4, "avg_cost": 45797 },
+  "alternatives": [
+    { "label": "Alternative 1", "blocks": ["..."], "summary_stats": { "...": "..." },
+      "budget": { "...": "..." } }
+  ],
+  "binding_constraints": [
+    "Water limit is reached in 2021.",
+    "Almonds acres are fixed at the current 80 acres because new perennial plantings are off."
+  ],
+  "infeasible_reason": null,
+  "error_detail": null,
+  "options_considered": 36,
+  "assumptions": ["..."]
+}
+```
+
+Numbers above are from one run on cached Merced weather and show the shape only.
+
+| Field | Type | Notes |
+|---|---|---|
+| `status` | `"optimal"`, `"feasible"`, `"no_profitable_plan"`, `"infeasible"`, `"error"` | `optimal`: the solver proved the plan highest scoring for the model. `feasible`: highest found within the 20 second solver limit. `no_profitable_plan`: blocks fit, but none makes money (or adds value), so the highest scoring plan is unplanted land. `infeasible`: the limits cannot all be met; see `infeasible_reason`. `error`: the plan failed the engine check; see `error_detail`. No plan is returned in that case |
+| `objective` | string | Echoes the request |
+| `plan` | object or null | Only for `optimal` and `feasible`. `blocks` are `/api/simulate` request blocks (ids `p1`, `p2`, ...) plus `avg_profit` and `avg_yield_tons` for that block; drop those two fields before posting the blocks to `/api/simulate`. `summary_stats`, `budget`, and `land` have the Part A shapes and come from running the blocks through `/api/simulate` with the request's budget, water limit, and available acres. `summary_stats.avg_yield_tons` is always filled when the crops have baseline yields |
+| `current_farm` | object or null | `null` without a `current_farm`. Blocks carry the same `avg_profit` and `avg_yield_tons`; `summary_stats` and `budget` come from the same engine and settings |
+| `difference_vs_current` | object or null | Plan minus current farm. A field is `null` when either side is `null`. `null` when there is no plan or no current farm |
+| `alternatives` | list | Up to 3 more plans, labeled `"Alternative 1"` to `"Alternative 3"`, each found by solving again with a no-good cut that forbids every option set already used, and each checked by the engine. A plan whose engine results equal the main plan's or an earlier alternative's is skipped (up to 12 solves) |
+| `binding_constraints` | string list | Plain sentences for limits with no room left: no block in the plan could grow by 0.1 acre without breaking it. Examples: `"Land is fully used May to Sep."`, `"Budget is the limit in 2015 and 2022."`, `"Water limit is reached in 2021."`, crop share limits, locked perennial acres, blocks at the minimum size |
+| `infeasible_reason` | string or null | Plain English, for `infeasible` and `no_profitable_plan`. Examples: `"The locked almond acres cost more than the budget in 2022."`, `"Even a 5 acre block of the cheapest option (oat, drip, Oct to Feb) costs $1,250 in its costliest year, more than the $100 budget."` |
+| `error_detail` | string or null | What failed in the engine check, for `error` |
+| `options_considered` | int | Options with complete money data that entered the search. `assumptions` says why any other option was left out |
+| `assumptions` | string list | Optimizer notes first, then the plan's `/api/simulate` assumptions. Text fields describe results only; none give advice |
+
+### How the plan is found
+
+1. **Options.** Every allowed (crop, irrigation, start month). Perennials: one option per irrigation type, year-round (1 to 12). Annuals: every month in `planting_months` (see Planting windows above), lasting `round(season_days / 30.44)` whole months from the 1st of that month, wrapping past December (5 months for each annual today: corn planted in May runs 5 to 9, oats planted in October run 10 to 2). Annuals without `planting_months` are skipped.
+2. **Per acre results.** Each option runs through the existing engine (`run_backtest` and `apply_money`, the code behind `/api/simulate`) for exactly 1 acre with no farm water limit. Per year: water applied, relative yield, US tons per acre (`backend/units.py`, scaled the same way as `yield_weight`), revenue, revenue at current prices, and total cost including water with the `/api/simulate` surface and groundwater split; plus the months occupied. Results are cached per option and input set. There is no second water or yield model: without a water limit the engine is linear in acres.
+3. **Mixed integer program** (scipy `milp`, HiGHS). Acres are whole multiples of 0.1, so the solver's answer is used as is. A binary per option gives `min_block_acres <= acres <= available_acres` or 0. Constraints: land per calendar month (a winter crop and a summer crop can share acres), budget per year or on average, water per year, crop share, and locked perennial acres. Profit per acre-foot is solved exactly with Dinkelbach iterations, then the most profit at that ratio; if a profitable plan needs no irrigation water, its ratio has no upper limit and `assumptions` says so. Ties prefer less water. The budget used by the solver is lowered by half a dollar per option plus one dollar, so the engine's whole dollar rounding cannot push a year over.
+4. **Verify.** The blocks run through the full `simulate` path. Average profit, cost, and water must match the optimizer within 1 percent (or the engine's rounding: one dollar per block plus one, 0.15 acre-ft), and no land, budget, water, crop share, or locked acre limit may be broken in any year. The engine must not have had to share out water. Any failure returns `status: "error"` instead of a plan.
+5. **Not included.** Installation cost for a new irrigation system and orchard establishment: new orchards take 3 to 5 years to bear, and establishment costs are not modeled. Frost damage is not modeled, so early planting months can look better than they would be in the field.
+6. **Errors.** A `current_farm` season outside the weather record gets a `422`, like `/api/simulate`. Data service failures get a `502`.

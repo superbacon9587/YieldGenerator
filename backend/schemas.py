@@ -357,3 +357,104 @@ class MetaResponse(BaseModel):
     first_year: int
     last_full_year: int
     presets: list[int]
+
+
+# ---------------------------------------------------------------- optimize (Part C, iteration 2)
+# POST /api/optimize. Logic lives in backend/optimize.py; docs in docs/api_contract.md.
+
+Objective = Literal["profit", "production_value", "profit_per_af"]
+BudgetRule = Literal["every_year", "average"]
+OptimizeStatus = Literal["optimal", "feasible", "no_profitable_plan", "infeasible", "error"]
+
+
+class CurrentFarmIn(_Strict):
+    blocks: list[BlockIn] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def _unique_block_ids(self) -> "CurrentFarmIn":
+        ids = [b.id for b in self.blocks]
+        dupes = sorted({i for i in ids if ids.count(i) > 1})
+        if dupes:
+            raise ValueError(f"block ids must be unique, repeated: {dupes}")
+        return self
+
+
+class OptimizeRequest(_Strict):
+    location: LocationIn
+    years: tuple[int, int] = Field(description="[start, end], inclusive")
+    price_mode: PriceMode = "current"
+    available_acres: float = Field(gt=0, description="Total land the farm has")
+    budget_usd: float = Field(ge=0, description="Yearly operating budget in dollars")
+    budget_rule: BudgetRule = "every_year"
+    water_available_af: float | None = Field(
+        default=None, ge=0, description="Cap on total farm water per year, acre-ft")
+    objective: Objective = "profit"
+    allowed_crops: list[Crop] | None = Field(
+        default=None, min_length=1, description="None means every crop")
+    allowed_irrigation: list[Irrigation] | None = Field(
+        default=None, min_length=1, description="None means every irrigation type")
+    allow_new_perennials: bool = False
+    max_share_per_crop: float = Field(default=0.7, gt=0, le=1)
+    min_block_acres: float = Field(default=5, ge=0)
+    soil: Soil = "loam"
+    current_farm: CurrentFarmIn | None = None
+
+    @field_validator("years")
+    @classmethod
+    def _check_years(cls, v: tuple[int, int]) -> tuple[int, int]:
+        start, end = v
+        if not (MIN_YEAR <= start <= end <= MAX_YEAR):
+            raise ValueError(
+                f"years must be [start, end] with {MIN_YEAR} <= start <= end, got {list(v)}")
+        return v
+
+
+class OptimizeBlockOut(BlockIn):
+    """A /api/simulate request block plus its own averages. Drop avg_profit and
+    avg_yield_tons before posting the block to /api/simulate."""
+    avg_profit: float | None = Field(description="Mean yearly profit of this block; None without price data")
+    avg_yield_tons: float | None = Field(description="Mean yearly harvest of this block, US tons")
+
+
+class OptimizePlanOut(BaseModel):
+    blocks: list[OptimizeBlockOut]
+    summary_stats: SummaryStatsOut
+    budget: BudgetOut
+    land: LandOut
+
+
+class OptimizeCurrentFarmOut(BaseModel):
+    blocks: list[OptimizeBlockOut]
+    summary_stats: SummaryStatsOut
+    budget: BudgetOut
+
+
+class OptimizeDifferenceOut(BaseModel):
+    """Plan minus current farm. None when either side has no value."""
+    avg_profit: float | None
+    avg_yield_tons: float | None
+    avg_water_applied_af: float | None
+    avg_cost: float | None
+
+
+class OptimizeAlternativeOut(BaseModel):
+    label: str
+    blocks: list[OptimizeBlockOut]
+    summary_stats: SummaryStatsOut
+    budget: BudgetOut
+
+
+class OptimizeResponse(BaseModel):
+    status: OptimizeStatus
+    objective: Objective
+    plan: OptimizePlanOut | None
+    current_farm: OptimizeCurrentFarmOut | None
+    difference_vs_current: OptimizeDifferenceOut | None
+    alternatives: list[OptimizeAlternativeOut] = Field(default_factory=list)
+    binding_constraints: list[str] = Field(
+        default_factory=list, description="Plain sentences, for example 'Land is fully used May to Sep.'")
+    infeasible_reason: str | None = None
+    error_detail: str | None = Field(
+        default=None, description="Why the engine check failed when status is 'error'")
+    options_considered: int = Field(ge=0)
+    assumptions: list[str]
