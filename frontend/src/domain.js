@@ -255,7 +255,7 @@ export function summaryMetrics(result) {
 }
 export function scenarioFarm(
   baseline,
-  { type, blockId, crop, acres, irrigation },
+  { type, blockId, crop, acres, irrigation, start_month, end_month },
   baselineResult,
 ) {
   const farm = clone(baseline);
@@ -272,6 +272,10 @@ export function scenarioFarm(
             crop,
             acres: Number(acres),
             irrigation,
+            ...(start_month != null
+              ? { start_month: Number(start_month) }
+              : {}),
+            ...(end_month != null ? { end_month: Number(end_month) } : {}),
             ...(CROPS[crop]?.perennial
               ? { start_month: 1, end_month: 12 }
               : {}),

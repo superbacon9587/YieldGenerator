@@ -19,7 +19,6 @@ import {
   Wallet,
   Download,
   Printer,
-  Lightbulb,
   ArrowDown,
   LoaderCircle,
   Info,
@@ -27,6 +26,7 @@ import {
 } from "lucide-react";
 import {
   CROPS,
+  MONTHS,
   IRRIGATION,
   mean,
   number,
@@ -51,6 +51,8 @@ import BudgetBanner from "../features/summary/BudgetBanner.jsx";
 import ProductionChart from "../features/summary/ProductionChart.jsx";
 import SaveSetup from "../features/compare/SaveSetup.jsx";
 import { periodLabel } from "../features/summary/landBudget.js";
+import SystemComparisons from "../features/comparisons/SystemComparisons.jsx";
+import { comparisonChange } from "../features/comparisons/model.js";
 
 function Metric({ label, value, detail, icon: Icon }) {
   return (
@@ -155,11 +157,6 @@ export default function Results({ farm, result, mock, onBack }) {
   const metrics = summaryMetrics(result);
   const { unit: yieldUnit } = useYieldUnit();
   const weights = weightByBlock(result);
-  const flags = [...(result.waste_flags ?? [])].sort(
-    (a, b) =>
-      (b.estimated_cost_per_year ?? -Infinity) -
-      (a.estimated_cost_per_year ?? -Infinity),
-  );
   const chartRows = result.years.map((y) => {
     const total = result.farm_totals.find((r) => r.year === y) ?? {};
     return {
@@ -245,6 +242,26 @@ export default function Results({ farm, result, mock, onBack }) {
       </div>
       <BudgetBanner result={result} />
       <SummaryCards result={result} />
+      <SystemComparisons
+        farm={farm}
+        comparisons={result.comparisons}
+        mock={mock}
+        disabled={busy}
+        onView={(row) => {
+          const next = comparisonChange(farm, row);
+          if (!next) return;
+          setSelected(row.block_id);
+          setChange(next);
+          setScenario(null);
+          setScenarioInput(null);
+          setError("");
+          const panel = document.getElementById("what-if");
+          const details = panel?.querySelector("details");
+          if (details) details.open = true;
+          panel?.scrollIntoView({ behavior: "smooth", block: "start" });
+          panel?.querySelector("select")?.focus({ preventScroll: true });
+        }}
+      />
       <p className="yield-note">
         <Info size={15} />
         <span>
@@ -495,67 +512,6 @@ export default function Results({ farm, result, mock, onBack }) {
           thresholds in the backend.
         </p>
       </section>
-      <section className="panel opportunities">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">POSSIBILITIES, NOT PRESCRIPTIONS</span>
-            <h2>
-              <Lightbulb size={20} /> What could you explore?
-            </h2>
-          </div>
-          <span className="chip">{flags.length} model flags</span>
-        </div>
-        <p className="subtle">
-          Use a flag to start a comparison. Estimated losses are not measured
-          waste, and a different crop is not automatically suitable.
-        </p>
-        {flags.length ? (
-          flags.map((flag, i) => (
-            <div className="flag" key={`${flag.block_id}-${i}`}>
-              <div className="flag-icon">
-                <Droplets size={19} />
-              </div>
-              <div>
-                <strong>
-                  {flag.block_id === "farm"
-                    ? "Farm-wide check"
-                    : `${CROPS[result.blocks.find((b) => b.id === flag.block_id)?.crop]?.name ?? flag.block_id} · ${flag.block_id}`}
-                </strong>
-                <p>{flag.message}</p>
-                <small>
-                  {number(flag.estimated_af_per_year, 1)} acre-ft / year ·{" "}
-                  {flag.estimated_cost_per_year == null
-                    ? "Cost unavailable"
-                    : `${money(flag.estimated_cost_per_year)} / year`}{" "}
-                  {mock ? "· synthetic estimate" : "· modeled estimate"}
-                </small>
-                {farm.blocks.some((b) => b.id === flag.block_id) && (
-                  <div className="goal-action">
-                    <button
-                      className="text-button"
-                      onClick={() => {
-                        chooseBlock(flag.block_id);
-                        document
-                          .getElementById("what-if")
-                          ?.scrollIntoView({
-                            behavior: "smooth",
-                            block: "start",
-                          });
-                      }}
-                    >
-                      Explore this crop entry <ArrowUpRight size={13} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            </div>
-          ))
-        ) : (
-          <div className="empty-inline">
-            No flags returned. This does not establish that the farm is optimal.
-          </div>
-        )}
-      </section>
       <section className="panel what-if" id="what-if">
         <div className="panel-heading">
           <div>
@@ -591,7 +547,9 @@ export default function Results({ farm, result, mock, onBack }) {
           water. Drip compatibility and installation costs are not assessed.
         </p>
         <details className="disclosure" open>
-          <summary>Compare a crop, area, or irrigation change</summary>
+          <summary>
+            Compare a crop, area, irrigation, or growing-window change
+          </summary>
           <div className="scenario-form">
             <label>
               Crop entry
@@ -610,7 +568,15 @@ export default function Results({ farm, result, mock, onBack }) {
               Try this crop
               <select
                 value={change.crop}
-                onChange={(e) => setChange({ ...change, crop: e.target.value })}
+                onChange={(e) =>
+                  setChange({
+                    ...change,
+                    crop: e.target.value,
+                    ...(CROPS[e.target.value]?.perennial
+                      ? { start_month: 1, end_month: 12 }
+                      : {}),
+                  })
+                }
               >
                 {Object.entries(CROPS).map(([key, c]) => (
                   <option key={key} value={key}>
@@ -646,6 +612,24 @@ export default function Results({ farm, result, mock, onBack }) {
                 ))}
               </select>
             </label>
+            {["start_month", "end_month"].map((field) => (
+              <label key={field}>
+                {field === "start_month" ? "Start month" : "End month"}
+                <select
+                  value={change[field]}
+                  disabled={CROPS[change.crop]?.perennial}
+                  onChange={(e) =>
+                    setChange({ ...change, [field]: Number(e.target.value) })
+                  }
+                >
+                  {MONTHS.map((month, index) => (
+                    <option key={month} value={index + 1}>
+                      {month}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
           </div>
           <p className="caption">
             Annual crop swaps keep the selected growing months. Perennial swaps

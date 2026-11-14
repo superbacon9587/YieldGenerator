@@ -70,3 +70,13 @@ npm run dev
 ```
 
 Keep both windows open. Select Live backend, run the default Merced farm, and check county, cost region, crop-by-crop results, and assumptions. The first real run may take longer while NASA weather is downloaded and cached. A historical backtest is a model of past conditions, not a guaranteed future harvest.
+
+## Part B: system comparisons
+
+Run the default Merced farm in Live backend mode. Below the summary cards, System comparisons groups alternatives by crop entry. Financial changes, relative-yield percentage points, water changes, and worst-year profit changes come directly from the backend. Missing financial changes display No price data. Installation and other exclusion notes appear below each crop.
+
+Each crop initially shows three comparisons; Show all appears when the response includes more. View in what-if selects the named entry, irrigation, and exact start/end months. Click Compare scenario to run it. The original farm and its results remain unchanged. Annual months can be edited; perennials stay January to December.
+
+Older backend responses and offline demo fixtures without comparisons hide this section. Planting-window comparisons appear only when backend crop references supply planting months. No dates are invented. These comparisons remain differences in modeled outcomes, not crop recommendations or absolute harvest quantities.
+
+On a narrow screen, comparison rows become labeled cards. Wider screens show a compact table. The section displays a Live model results or Synthetic demo badge.

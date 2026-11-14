@@ -1,0 +1,172 @@
+.system-crop-card {
+  border-top: 1px solid var(--border, #e1e6da);
+  margin-top: 24px;
+  padding-top: 22px;
+}
+.system-crop-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.system-crop-heading h3 {
+  margin: 0;
+  font-size: 21px;
+}
+.system-crop-heading p {
+  margin: 9px 0 16px;
+  color: #647267;
+  font-size: 14px;
+}
+.system-crop-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.system-table-scroll {
+  overflow-x: auto;
+}
+.system-table {
+  width: 100%;
+  min-width: 940px;
+  border-collapse: collapse;
+}
+.system-table th,
+.system-table td {
+  padding: 17px 12px;
+  text-align: left;
+  border-bottom: 1px solid #e5e9df;
+}
+.system-table thead th {
+  font-size: 12px;
+  color: #627165;
+  font-weight: 500;
+}
+.system-table tbody th {
+  font-size: 14px;
+  font-weight: 500;
+  min-width: 185px;
+}
+.system-table .secondary {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.system-delta {
+  display: block;
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.system-delta.positive {
+  color: #276447;
+}
+.system-delta.negative {
+  color: #a33e36;
+}
+.system-delta.neutral,
+.system-delta.unavailable {
+  color: #657067;
+}
+.system-delta.unavailable {
+  font-size: 13px;
+  font-weight: 500;
+}
+.system-exclusions p {
+  color: #647267;
+  font-size: 12px;
+  margin: 10px 0 0;
+  line-height: 1.6;
+}
+.system-show-all {
+  margin-top: 14px;
+}
+.system-comparisons .panel-heading {
+  flex-wrap: wrap;
+  gap: 12px;
+}
+@media (max-width: 600px) {
+  .system-delta {
+    font-size: 16px;
+  }
+  .system-crop-heading h3 {
+    font-size: 19px;
+  }
+}
+@media print {
+  .system-table {
+    min-width: 0;
+  }
+  .system-table-scroll {
+    overflow: visible;
+  }
+  .system-table th,
+  .system-table td {
+    padding: 6px;
+  }
+  .system-delta {
+    font-size: 11px;
+    white-space: normal;
+  }
+  .system-table button,
+  .system-show-all {
+    display: none;
+  }
+}
+
+.system-table .sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media screen and (max-width: 1250px) {
+  .system-table {
+    display: block;
+    min-width: 0;
+  }
+  .system-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .system-table tbody {
+    display: block;
+  }
+  .system-table tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    padding: 22px 0;
+    border-bottom: 1px solid #e5e9df;
+  }
+  .system-table tbody th {
+    grid-column: 1 / -1;
+    padding: 0;
+    border: 0;
+    font-weight: 600;
+  }
+  .system-table tbody td {
+    display: block;
+    padding: 0;
+    border: 0;
+    min-width: 0;
+  }
+  .system-table tbody td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    font-size: 11px;
+    line-height: 1.5;
+    color: #647267;
+    margin-bottom: 4px;
+  }
+  .system-table tbody td:last-child {
+    grid-column: 1 / -1;
+  }
+}
