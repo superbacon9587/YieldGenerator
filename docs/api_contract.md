@@ -83,10 +83,14 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 
 | id | `planting_months` | `season_days` |
 |---|---|---|
-| `processing_tomatoes` | 2, 3, 4, 5 | 155 (35 + 40 + 50 + 30) |
+| `processing_tomatoes` | 3, 4, 5 | 155 (35 + 40 + 50 + 30) |
 | `corn` | 3, 4, 5, 6 | 150 (30 + 40 + 50 + 30) |
 | `oats` | 10, 11, 12, 1 | 160 (20 + 50 + 60 + 30) |
 | `almonds`, `walnuts`, `alfalfa_hay` | null (year-round) | none |
+
+Processing tomato planting starts in March: February was removed because no checked UC source supports it.
+
+**Frost check** (`backend/frost.py`). Each annual also has `frost_tolerant` (oats `true`, processing tomatoes and corn `false`; UC sources, `verify: true`). For a planting window at the farm's location, `frost_risk_share` is the share of backtest years where the NASA POWER daily minimum (`T2M_MIN`) is at or below 0 C on any of the first 45 days after planting (the 1st of the start month is day 1; a season that wraps the new year is planted in the year before the season year). Years whose 45 days are not all in the weather record are not counted. `/api/simulate` adds a neutral sentence to `assumptions` for each annual block whose window has `frost_risk_share` above 0.2, for example `"Frost occurred within 45 days of planting in 6 of 20 years for block b2 (corn planted in Mar)."` The optimizer leaves out options for crops that are not frost tolerant when the share is above 0.2 (see POST /api/optimize).
 
 The simulation still stretches or shrinks `stage_days` to fit each block's start and end months; `season_days` does not change simulation results. Because the planting windows now exist, `POST /api/simulate` returns `planting_window` comparisons for annual entries (see System comparisons below).
 
@@ -227,7 +231,7 @@ Sorted by `estimated_af_per_year`, largest first. Can be an empty list.
 
 ### `assumptions`
 
-A list of plain English strings. Includes the fixed model assumptions, the ranking used in `summary`, the price mode, and every `data_quality` note from the location context. Show all of them in the "Why this result?" panel.
+A list of plain English strings, worded as facts with no advice (a test scans every string the API can return for advice phrases). Includes the fixed model assumptions, the ranking used in `summary`, the price mode, and every `data_quality` note from the location context. Show all of them in the "Why this result?" panel.
 
 ### Iteration 2 additions (Part A)
 
@@ -496,9 +500,9 @@ Numbers above are from one run on cached Merced weather and show the shape only.
 
 ### How the plan is found
 
-1. **Options.** Every allowed (crop, irrigation, start month). Perennials: one option per irrigation type, year-round (1 to 12). Annuals: every month in `planting_months` (see Planting windows above), lasting `round(season_days / 30.44)` whole months from the 1st of that month, wrapping past December (5 months for each annual today: corn planted in May runs 5 to 9, oats planted in October run 10 to 2). Annuals without `planting_months` are skipped.
+1. **Options.** Every allowed (crop, irrigation, start month). Options for crops that are not frost tolerant are left out when `frost_risk_share` for their window is above 0.2 (see Frost check above); `assumptions` says how many options were left out and lists each window with its frost years, for example `"4 options were left out because frost occurred within 45 days of planting in more than 20% of the backtest years and the crop is not frost tolerant: processing tomato planted in Feb (11 of 20 years)."` Perennials: one option per irrigation type, year-round (1 to 12). Annuals: every month in `planting_months` (see Planting windows above), lasting `round(season_days / 30.44)` whole months from the 1st of that month, wrapping past December (5 months for each annual today: corn planted in May runs 5 to 9, oats planted in October run 10 to 2). Annuals without `planting_months` are skipped.
 2. **Per acre results.** Each option runs through the existing engine (`run_backtest` and `apply_money`, the code behind `/api/simulate`) for exactly 1 acre with no farm water limit. Per year: water applied, relative yield, US tons per acre (`backend/units.py`, scaled the same way as `yield_weight`), revenue, revenue at current prices, and total cost including water with the `/api/simulate` surface and groundwater split; plus the months occupied. Results are cached per option and input set. There is no second water or yield model: without a water limit the engine is linear in acres.
 3. **Mixed integer program** (scipy `milp`, HiGHS). Acres are whole multiples of 0.1, so the solver's answer is used as is. A binary per option gives `min_block_acres <= acres <= available_acres` or 0. Constraints: land per calendar month (a winter crop and a summer crop can share acres), budget per year or on average, water per year, crop share, and locked perennial acres. Profit per acre-foot is solved exactly with Dinkelbach iterations, then the most profit at that ratio; if a profitable plan needs no irrigation water, its ratio has no upper limit and `assumptions` says so. Ties prefer less water. The budget used by the solver is lowered by half a dollar per option plus one dollar, so the engine's whole dollar rounding cannot push a year over.
 4. **Verify.** The blocks run through the full `simulate` path. Average profit, cost, and water must match the optimizer within 1 percent (or the engine's rounding: one dollar per block plus one, 0.15 acre-ft), and no land, budget, water, crop share, or locked acre limit may be broken in any year. The engine must not have had to share out water. Any failure returns `status: "error"` instead of a plan.
-5. **Not included.** Installation cost for a new irrigation system and orchard establishment: new orchards take 3 to 5 years to bear, and establishment costs are not modeled. Frost damage is not modeled, so early planting months can look better than they would be in the field.
+5. **Not included.** Installation cost for a new irrigation system and orchard establishment: new orchards take 3 to 5 years to bear, and establishment costs are not modeled. Frost does not lower modeled yields; it is used only to leave out frost sensitive planting windows (see Frost check).
 6. **Errors.** A `current_farm` season outside the weather record gets a `422`, like `/api/simulate`. Data service failures get a `502`.

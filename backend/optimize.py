@@ -16,7 +16,11 @@ Steps:
     water applied, relative yield, tons per acre (backend/units.py through the
     shared yield_weight scaling), revenue, revenue at current prices, and total
     cost including water (surface and groundwater split as in /api/simulate),
-    plus the months the land is occupied. Results are cached per option. There
+    plus the months the land is occupied. Results are cached per option. Each
+    annual option also gets frost_risk_share (backend/frost.py): the share of
+    backtest years with a daily minimum at or below 0 C in the first 45 days
+    after planting. Options for crops that are not frost tolerant are left out
+    when that share is above 0.2, with a note saying how many and why. There
     is no second water or yield model: without a water limit the engine is
     linear in acres, so a plan's totals are acre-weighted sums.
  3. Mixed integer linear program (scipy.optimize.milp, HiGHS). Acres are whole
@@ -58,7 +62,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 
-from backend import reference, simulate as engine, units, yield_weight
+from backend import frost, reference, simulate as engine, units, yield_weight
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
@@ -116,6 +120,7 @@ class Option:
     revenue: np.ndarray           # $ per acre at the request's price mode
     revenue_current: np.ndarray   # $ per acre at current prices
     cost: np.ndarray              # $ per acre, production plus water
+    frost_risk_share: float | None = None   # annuals: share of years with frost after planting
 
     @property
     def crop(self) -> str:
@@ -267,6 +272,8 @@ class Problem:
     lock_errors: list[str] = field(default_factory=list)
     notes: dict[str, None] = field(default_factory=dict)        # ordered set
     excluded: dict[str, None] = field(default_factory=dict)
+    frost: dict[tuple[str, int], frost.FrostRisk] = field(default_factory=dict)  # (crop, start)
+    frost_excluded: int = 0                                     # options left out for frost
 
     @property
     def budget_limit(self) -> float:
@@ -300,6 +307,7 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
                     f"{_crop_noun(crop)}s are not in the allowed crops.")
 
     keys = []
+    frost_left_out: list[str] = []
     for crop in crops:
         if crop in PERENNIALS and not req.allow_new_perennials and crop not in problem.locked:
             problem.excluded[f"{_crop_label(crop)} was left out: new perennial plantings are off "
@@ -310,6 +318,14 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
             problem.excluded[f"{_crop_label(crop)} was left out: crops.json has no planting "
                              "months for it."] = None
         for start, end in windows:
+            if crop not in PERENNIALS:
+                risk = frost.frost_risk(wx, start, end, years)
+                problem.frost[(crop, start)] = risk
+                if risk.above_limit and not reference.frost_tolerant(crop):
+                    problem.frost_excluded += len(irrigations)
+                    frost_left_out.append(f"{_crop_noun(crop)} planted in {MONTH_NAMES[start - 1]} "
+                                          f"({risk.frost_years} of {risk.years} years)")
+                    continue
             for irr in irrigations:
                 block = BlockIn(id="x", crop=crop, acres=1.0, irrigation=irr,
                                 start_month=start, end_month=end)
@@ -320,11 +336,20 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
                         f"{_crop_label(crop)} planted in {MONTH_NAMES[start - 1]} was left out: "
                         "its seasons need weather outside the available record."] = None
 
+    if frost_left_out:
+        n = problem.frost_excluded
+        problem.excluded[
+            f"{n} option{'s were' if n != 1 else ' was'} left out because frost occurred within "
+            f"{frost.FROST_WINDOW_DAYS} days of planting in more than "
+            f"{frost.FROST_SHARE_LIMIT:.0%} of the backtest years and the crop is not frost "
+            f"tolerant: {', '.join(frost_left_out)}."] = None
+
     for key, result in evaluate_options(req, keys, wx, ctx).items():
         if isinstance(result, str):
             problem.excluded[result] = None
         else:
-            problem.options.append(result)
+            risk = problem.frost.get((key.crop, key.start_month))
+            problem.options.append(replace(result, frost_risk_share=risk.share if risk else None))
 
     for crop, acres in problem.locked.items():
         if crop in crops and not any(o.crop == crop for o in problem.options):
@@ -718,8 +743,9 @@ def optimizer_notes(problem: Problem) -> list[str]:
         "Unplanted land has no cost and no income.",
         f"Acres are in steps of {ACRE_STEP:g} acre.",
         "Changing irrigation type does not include installation cost.",
-        "Frost and cold damage are not modeled, so the earliest planting months can look "
-        "better than they would be in the field.",
+        "Frost does not lower modeled yields. It is used only to leave out planting windows "
+        "of frost sensitive crops where frost occurred within 45 days of planting in more "
+        "than 20 percent of the backtest years.",
         PERENNIAL_LAG_NOTE,
     ]
     if req.budget_rule == "every_year":

@@ -11,7 +11,10 @@ Planting windows (iteration 2, for the optimizer):
                      store a bare null and are treated as year-round.
     season_days      annuals only: days from planting to harvest, the sum of
                      the crop's stage_days. Perennials do not have this field.
-Use planting_months() and season_days() rather than reading these directly.
+    frost_tolerant   annuals only: true when the crop handles frost in its first
+                     45 days (backend/frost.py). Perennials do not have it.
+Use planting_months(), season_days() and frost_tolerant() rather than reading
+these directly.
 
 Crop keys match data/reference/prices/crop_prices.csv: almonds, walnuts,
 processing_tomatoes, corn, oats, alfalfa_hay.
@@ -77,6 +80,11 @@ def planting_months(name: str) -> list[int] | None:
 def season_days(name: str) -> int | None:
     """Days from planting to harvest for an annual (sum of stage_days); None for a perennial."""
     return crop_params(name).get("season_days")
+
+
+def frost_tolerant(name: str) -> bool | None:
+    """True or False for an annual (crops.json frost_tolerant); None for a perennial."""
+    return crop_params(name).get("frost_tolerant")
 
 
 def irrigation_efficiency(system: str) -> float:

@@ -1272,7 +1272,7 @@
     "Effective rain uses the USDA SCS method (FAO-56 Annex 8).",
     "Relative yield uses FAO-33: 1 - Ya/Ym = Ky x (1 - ETa/ETc), with a small extra cut for heat stress days.",
     "Seasons that cross the new year are counted in the year they end.",
-    "Best, worst, and typical years are ranked by farm profit.",
+    "The summary's high, low, and typical years are ranked by farm profit.",
     "Prices: current mode, the latest price for each crop applied to every year.",
     "Applied water is 50 percent surface water at $50 per acre-ft and 50 percent groundwater pumped from 150 ft.",
     "Corn yield uses the statewide average (no county data for Merced)."
