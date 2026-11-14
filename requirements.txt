@@ -8,3 +8,5 @@ fastapi
 uvicorn
 httpx
 python-dotenv
+pydantic>=2.6
+matplotlib>=3.8
