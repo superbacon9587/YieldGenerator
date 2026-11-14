@@ -715,7 +715,8 @@ def build_response(bt: Backtest) -> SimulateResponse:
 
 
 def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
-             context: dict | None = None) -> SimulateResponse:
+             context: dict | None = None, *,
+             include_comparisons: bool = True) -> SimulateResponse:
     """Run the backtest for a request.
 
     Weather is loaded from NASA POWER and the location context from
@@ -729,4 +730,8 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
     bt = run_backtest(request, wx)
     bt.context = ctx
     apply_money(bt, ctx)
-    return build_response(bt)
+    response = build_response(bt)
+    if include_comparisons:
+        from backend.comparisons import build_comparisons
+        response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
+    return response
