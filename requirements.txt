@@ -1,3 +1,10 @@
 requests
 pymupdf
 pytest
+pandas
+pyarrow
+pyet
+fastapi
+uvicorn
+httpx
+python-dotenv

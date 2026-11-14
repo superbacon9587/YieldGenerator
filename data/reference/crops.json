@@ -1,0 +1,201 @@
+{
+  "_note": "Each field is {value, source, verify}. verify=false: copied from the cited FAO PDF in data/raw/fao/. verify=true: placeholder or outside publication that still needs checking. fao56_ch6.pdf page numbers are the printed page footers (n/32). fao66.pdf pages give the printed page number and the PDF page index. Temperatures in degC. season_start_month is 1 to 12. No winter chill fields in this version.",
+  "almonds": {
+    "type": "perennial",
+    "kc": {
+      "value": {"ini": 0.40, "mid": 0.90, "end": 0.65},
+      "source": "fao56_ch6.pdf, Table 12, p. 11 (Almonds, no ground cover; Kc end is before leaf drop, footnote 18, p. 13)",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 30, "dev": 50, "mid": 130, "late": 30},
+      "source": "fao56_ch6.pdf, Table 11, p. 5. Table 11 has no almond row; these are the 'Deciduous Orchard, Calif., USA' values used as a proxy",
+      "verify": true
+    },
+    "season_start_month": {
+      "value": 3,
+      "source": "fao56_ch6.pdf, Table 11, p. 5 (Deciduous Orchard, Calif., USA, plant date March; proxy, no almond row)",
+      "verify": true
+    },
+    "ky": {
+      "value": 0.8,
+      "source": "Placeholder. fao66.pdf gives no seasonal Ky for almond. Almond chapter, printed p. 365 (PDF p. 375), reports slopes of 0.7 to 0.9 for relative yield vs relative APPLIED water (not ET), so it is not a Ky",
+      "verify": true
+    },
+    "gdd_base_c": {
+      "value": 4.5,
+      "source": "Placeholder, publication not yet identified. Candidate: UC Davis Fruit and Nut Research and Information Center almond hull-split prediction model (GDD from full bloom); base temperature not confirmed",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 38.0,
+      "source": "Placeholder, publication not yet identified",
+      "verify": true
+    }
+  },
+  "walnuts": {
+    "type": "perennial",
+    "kc": {
+      "value": {"ini": 0.50, "mid": 1.10, "end": 0.65},
+      "source": "fao56_ch6.pdf, Table 12, p. 11 (Walnut Orchard; Kc end is before leaf drop, footnote 18, p. 13)",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 20, "dev": 10, "mid": 130, "late": 30},
+      "source": "fao56_ch6.pdf, Table 11, p. 5 (Walnuts, Utah, USA; the only walnut row, no California or Mediterranean entry)",
+      "verify": false
+    },
+    "season_start_month": {
+      "value": 4,
+      "source": "fao56_ch6.pdf, Table 11, p. 5 (Walnuts, Utah, USA, plant date April)",
+      "verify": false
+    },
+    "ky": {
+      "value": 0.8,
+      "source": "Placeholder. fao66.pdf gives no seasonal Ky for walnut. Walnut chapter, printed p. 411 (PDF p. 418), reports marketable yield losses of 50% and 32% after three years at 33% and 66% of ETc (Goldhamer 1997), not a seasonal Ky",
+      "verify": true
+    },
+    "gdd_base_c": {
+      "value": 10.0,
+      "source": "Placeholder, publication not yet identified",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 38.0,
+      "source": "Placeholder. Walnut quality literature mentions damage to exposed nuts at air temperatures of 38 C or more under water stress (exact publication not yet identified). UC ANR kaolin studies (Lampinen et al.) give about 50 C, but that is nut surface temperature, not air temperature",
+      "verify": true
+    }
+  },
+  "processing_tomatoes": {
+    "type": "annual",
+    "kc": {
+      "value": {"ini": 0.60, "mid": 1.15, "end": 0.80},
+      "source": "fao56_ch6.pdf, Table 12, p. 8 (Tomato: Kc mid 1.15, Kc end range 0.70 to 0.90; Kc ini 0.6 and Kc end 0.80 from the 'b. Vegetables - Solanum Family' group row, which is also the range midpoint)",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 35, "dev": 40, "mid": 50, "late": 30},
+      "source": "fao56_ch6.pdf, Table 11, p. 2 (Tomato, Calif., USA, plant date Apr/May)",
+      "verify": false
+    },
+    "season_start_month": {
+      "value": 4,
+      "source": "fao56_ch6.pdf, Table 11, p. 2 (Tomato, Calif., USA, plant date Apr/May; first month used)",
+      "verify": false
+    },
+    "ky": {
+      "value": 1.05,
+      "source": "fao66.pdf, Table 1, printed p. 7 (PDF p. 22): seasonal Ky, Tomato",
+      "verify": false
+    },
+    "gdd_base_c": {
+      "value": 10.0,
+      "source": "Zalom, F.G. and Wilson, L.T. 1999. Predicting phenological events of California processing tomatoes. Acta Horticulturae 487 (10 C base with 30 C upper cutoff fit observed development best)",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 35.0,
+      "source": "Upper end of the 25 to 35 C daily maximum range cited as ideal for fruit set in UC Cooperative Extension guidance; UC ANR Publication 7228, Processing Tomato Production in California (Hartz et al. 2008), notes fruit set suffers at higher temperatures. Not stated there as a hard threshold",
+      "verify": true
+    }
+  },
+  "corn": {
+    "type": "annual",
+    "kc": {
+      "value": {"ini": 0.30, "mid": 1.20, "end": 0.35},
+      "source": "fao56_ch6.pdf, Table 12, p. 10 (Maize, Field (grain): Kc mid 1.20, Kc end 0.60 to 0.35; 0.35 is for harvest after field drying, footnote 11, p. 12); Kc ini 0.3 from the 'i. Cereals' group row, p. 9",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 30, "dev": 40, "mid": 50, "late": 30},
+      "source": "fao56_ch6.pdf, Table 11, p. 4 (Maize (grain), Spain (spr, sum.); Calif., plant date April)",
+      "verify": false
+    },
+    "season_start_month": {
+      "value": 4,
+      "source": "fao56_ch6.pdf, Table 11, p. 4 (Maize (grain), Spain; Calif., plant date April)",
+      "verify": false
+    },
+    "ky": {
+      "value": 1.25,
+      "source": "fao66.pdf, Table 1, printed p. 7 (PDF p. 22): seasonal Ky, Maize",
+      "verify": false
+    },
+    "gdd_base_c": {
+      "value": 10.0,
+      "source": "Abendroth, L.J. et al. 2011. Corn Growth and Development. Iowa State University Extension PMR 1009 (GDD with 50 F base and 86 F cap)",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 35.0,
+      "source": "Luo, Q. 2011. Temperature thresholds and crop production: a review. Climatic Change 109: 583-598 (temperatures above 35 C are lethal to maize pollen viability)",
+      "verify": true
+    }
+  },
+  "oats": {
+    "type": "annual",
+    "kc": {
+      "value": {"ini": 0.30, "mid": 1.15, "end": 0.25},
+      "source": "fao56_ch6.pdf, Table 12, p. 9 (Oats: Kc mid 1.15, Kc end 0.25; Kc ini 0.3 from the 'i. Cereals' group row)",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 20, "dev": 50, "mid": 60, "late": 30},
+      "source": "fao56_ch6.pdf, Table 11, p. 4 (Barley/Oats/Wheat, Calif. Desert, USA, plant date Dec; no Mediterranean row for this group)",
+      "verify": false
+    },
+    "season_start_month": {
+      "value": 12,
+      "source": "fao56_ch6.pdf, Table 11, p. 4 (Barley/Oats/Wheat, Calif. Desert, USA, plant date Dec)",
+      "verify": false
+    },
+    "ky": {
+      "value": 1.05,
+      "source": "Placeholder. fao66.pdf Table 1, printed p. 7 (PDF p. 22) has no oats entry; value is the Winter wheat Ky from that table, used as the closest fall sown small grain",
+      "verify": true
+    },
+    "gdd_base_c": {
+      "value": 0.0,
+      "source": "North Dakota State University Extension, Small grain growth stages table (oats: base 32 F, optimum 70 F, maximum 86 F), ag.ndsu.edu/sgdfs/wheat/growth_stages2.htm",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 30.0,
+      "source": "North Dakota State University Extension, Small grain growth stages table (oats maximum temperature 86 F = 30 C), ag.ndsu.edu/sgdfs/wheat/growth_stages2.htm",
+      "verify": true
+    }
+  },
+  "alfalfa_hay": {
+    "type": "perennial",
+    "kc": {
+      "value": {"ini": 0.40, "mid": 0.95, "end": 0.90},
+      "source": "fao56_ch6.pdf, Table 12, p. 10 (Alfalfa Hay, averaged cutting effects; Kc mid is a whole season average, footnote 13, p. 12)",
+      "verify": false
+    },
+    "stage_days": {
+      "value": {"ini": 10, "dev": 30, "mid": 200, "late": 30},
+      "source": "ini and dev: fao56_ch6.pdf, Table 11, p. 5 (Alfalfa, total season). mid and late are 'var.' in the table (season runs from last -4 C in spring to first -4 C in fall, footnote 4, p. 6), so 200 and 30 are placeholders",
+      "verify": true
+    },
+    "season_start_month": {
+      "value": 3,
+      "source": "Placeholder within the range in fao56_ch6.pdf, Table 11, p. 5 (Alfalfa 1st cutting cycle, Calif., USA, plant date Jan to Apr, last -4 C)",
+      "verify": true
+    },
+    "ky": {
+      "value": 1.1,
+      "source": "fao66.pdf, Table 1, printed p. 7 (PDF p. 22): seasonal Ky, Alfalfa",
+      "verify": false
+    },
+    "gdd_base_c": {
+      "value": 5.0,
+      "source": "Sharratt, B.S., Sheaffer, C.C. and Baker, D.G. 1989. Base temperature for the application of the growing-degree-day model to field-grown alfalfa. Field Crops Research 21 (41 F / 5 C base, used by Penn State, Minnesota and Iowa State Extension)",
+      "verify": true
+    },
+    "heat_stress_c": {
+      "value": 35.0,
+      "source": "Placeholder, publication not yet identified",
+      "verify": true
+    }
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "_note": "PLACEHOLDER VALUES. Available water capacity (field capacity minus wilting point) in mm of water per m of root zone. Check every value against its source before use.",
+  "sand": {
+    "awc_mm_per_m": 80,
+    "range_mm_per_m": [50, 110],
+    "source": "FAO-56 Table 19 (theta_FC minus theta_WP for sand, 0.05 to 0.11 m3/m3); value is the range midpoint",
+    "verify": true
+  },
+  "loam": {
+    "awc_mm_per_m": 155,
+    "range_mm_per_m": [110, 200],
+    "source": "FAO-56 Table 19 (theta_FC minus theta_WP for loam, 0.11 to 0.20 m3/m3); value is the range midpoint",
+    "verify": true
+  },
+  "clay": {
+    "awc_mm_per_m": 160,
+    "range_mm_per_m": [120, 200],
+    "source": "FAO-56 Table 19 (theta_FC minus theta_WP for clay, 0.12 to 0.20 m3/m3); value is the range midpoint",
+    "verify": true
+  }
+}

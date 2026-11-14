@@ -1,0 +1,23 @@
+{
+  "_note": "PLACEHOLDER VALUES. Application efficiency as a fraction (water used by the crop / water applied). Check every value against its source before use.",
+  "drip": {
+    "efficiency": 0.90,
+    "source": "Placeholder typical value; check Brouwer et al. 1989, FAO Irrigation Water Management Training Manual No. 4, and UC ANR / Cal Poly ITRC guidance",
+    "verify": true
+  },
+  "micro-sprinkler": {
+    "efficiency": 0.85,
+    "source": "Placeholder typical value; check UC ANR / Cal Poly ITRC guidance for microsprinklers in orchards",
+    "verify": true
+  },
+  "sprinkler": {
+    "efficiency": 0.75,
+    "source": "Placeholder typical value; check Brouwer et al. 1989, FAO Irrigation Water Management Training Manual No. 4",
+    "verify": true
+  },
+  "flood": {
+    "efficiency": 0.60,
+    "source": "Placeholder typical value for surface (furrow / border) irrigation; check Brouwer et al. 1989, FAO Irrigation Water Management Training Manual No. 4",
+    "verify": true
+  }
+}
