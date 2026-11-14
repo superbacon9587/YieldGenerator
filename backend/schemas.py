@@ -184,6 +184,25 @@ class WasteFlagOut(BaseModel):
         ge=0, description="Dollars per year; None when water prices are unavailable")
 
 
+class ComparisonSystem(BaseModel):
+    irrigation: Irrigation
+    start_month: int = Field(ge=1, le=12)
+    end_month: int = Field(ge=1, le=12)
+
+
+class ComparisonOut(BaseModel):
+    block_id: str
+    crop: Crop
+    kind: Literal["irrigation", "planting_window"]
+    current: ComparisonSystem
+    alternative: ComparisonSystem
+    avg_profit_change: float | None
+    avg_relative_yield_change_pts: float | None
+    avg_water_change_af: float | None
+    worst_year_profit_change: float | None
+    excludes: str
+
+
 class SimulateResponse(BaseModel):
     location: LocationOut
     years: list[int]
@@ -191,6 +210,7 @@ class SimulateResponse(BaseModel):
     farm_totals: list[FarmYearOut]
     summary: SummaryOut
     waste_flags: list[WasteFlagOut]
+    comparisons: list[ComparisonOut] = Field(default_factory=list)
     assumptions: list[str]
 
 

@@ -218,3 +218,35 @@ The Pydantic model `LocationContext` in `backend/schemas.py` describes this shap
 | `data_quality` | string list | Notes the engine copies into the response `assumptions` |
 
 A crop can be missing from `baseline_yields` or `production_costs` when no data exists anywhere. The engine then still returns water and relative yield for that crop, sets its revenue, cost, and profit to `null`, and adds a note to `assumptions`. The numbers above only show the shape.
+
+## System comparisons (Part B, iteration 2)
+
+The response now includes `comparisons` (an empty list when no alternatives can be evaluated). Existing fields remain unchanged. Each item has:
+
+```json
+{
+  "block_id": "b3",
+  "crop": "corn",
+  "kind": "irrigation",
+  "current": {"irrigation": "flood", "start_month": 5, "end_month": 9},
+  "alternative": {"irrigation": "drip", "start_month": 5, "end_month": 9},
+  "avg_profit_change": 1189,
+  "avg_relative_yield_change_pts": 0.4,
+  "avg_water_change_af": -20.5,
+  "worst_year_profit_change": 2100,
+  "excludes": "Installation cost of the new system is not included."
+}
+```
+
+Numbers above illustrate the shape; they are not measured results.
+
+- Each alternative changes exactly one entry, retaining its acres, crop, location, years, price mode, and optional inputs. With a water cap, the whole farm is simulated using the existing engine and the same weather/context, with nested comparisons disabled. Without a cap, entries are independent, so only the changed entry is simulated at its actual acreage; tests confirm it matches a full-farm rerun.
+- Metrics describe the **changed crop entry**, not total farm differences. Farm water allocation is recalculated, so other entries can also change under a water cap; the exclusion note explicitly flags this. Profit and water changes are alternative minus current. Relative yield change is in **percentage points**, not harvested weight. Worst-year change is the alternative's minimum profit minus the current minimum; these minima may occur in different years.
+- Financial differences are null unless profit is available for that entry in both setups in every compared year. Null means unavailable, never zero. The UI can display `No price data`.
+- Within each block, rows are ordered by average profit change descending, with nulls last. This is ordering, not advice or a suitability ranking.
+- Irrigation alternatives include each other API irrigation type. Installation costs are excluded.
+- Annual planting alternatives use only `planting_months` already present in crop reference data, accepting either a list or the existing `{value, source, verify}` format. The end month shifts by the same number of months, wrapping December. No dates are invented when the list is missing. Perennials get no planting-window comparisons. Market timing and field operations are excluded.
+- Alternatives requiring weather outside the available record are omitted, with an explanation in `assumptions`.
+- Budget checks are not added by this feature. The current engine does not yet accept Part A's yearly budget field; once added, comparison requests preserve it along with the other farm inputs.
+- Internal callers such as the optimizer can use `simulate(..., include_comparisons=False)` to avoid generating nested alternatives. The public endpoint includes comparisons by default.
+- No new endpoint is needed: `POST /api/simulate` includes the comparisons. This change does not alter the frontend or add absolute production quantities.
