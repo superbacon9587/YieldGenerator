@@ -1,8 +1,6 @@
 import { useState } from "react";
 import {
   ResponsiveContainer,
-  LineChart,
-  Line,
   BarChart,
   Bar,
   CartesianGrid,
@@ -40,6 +38,15 @@ import {
 } from "../domain.js";
 import { simulate } from "../api.js";
 import Timeline from "./Timeline.jsx";
+import YieldWeightChart from "../features/yield/YieldWeightChart.jsx";
+import HarvestCard from "../features/yield/HarvestCard.jsx";
+import { useYieldUnit } from "../features/yield/YieldUnitContext.jsx";
+import { weightByBlock, weightRow } from "../features/yield/yieldData.js";
+import {
+  formatWeight,
+  potentialPercent,
+  unitLabel,
+} from "../features/yield/yieldUnits.js";
 
 function Metric({ label, value, detail, icon: Icon }) {
   return (
@@ -142,6 +149,8 @@ export default function Results({ farm, result, mock, onBack }) {
     [error, setError] = useState(""),
     [scenarioTitle, setScenarioTitle] = useState("");
   const metrics = summaryMetrics(result);
+  const { unit: yieldUnit } = useYieldUnit();
+  const weights = weightByBlock(result);
   const flags = [...(result.waste_flags ?? [])].sort(
     (a, b) =>
       (b.estimated_cost_per_year ?? -Infinity) -
@@ -155,23 +164,13 @@ export default function Results({ farm, result, mock, onBack }) {
       ...Object.fromEntries(
         result.blocks.map((b) => [
           b.id,
-          chart === "yield"
-            ? (b.yearly.find((r) => r.year === y)?.relative_yield ?? null) ==
-              null
-              ? null
-              : b.yearly.find((r) => r.year === y).relative_yield * 100
-            : (b.yearly.find((r) => r.year === y)?.water_applied_af ?? null),
+          b.yearly.find((r) => r.year === y)?.water_applied_af ?? null,
         ]),
       ),
     };
   });
   const flagged = result.summary.drought_years ?? [];
-  const unit =
-    chart === "yield"
-      ? "% of unstressed baseline"
-      : chart === "water"
-        ? "acre-feet applied"
-        : "USD";
+  const unit = chart === "water" ? "acre-feet applied" : "USD";
   async function compare(type = "custom", override) {
     setBusy(true);
     setError("");
@@ -236,7 +235,8 @@ export default function Results({ farm, result, mock, onBack }) {
           historical seasons
         </span>
       </div>
-      <div className="metrics-grid">
+      <div className="metrics-grid with-harvest">
+        <HarvestCard result={result} relativeYield={metrics.yield} />
         <Metric
           label="Relative yield"
           value={percent(metrics.yield)}
@@ -276,9 +276,9 @@ export default function Results({ farm, result, mock, onBack }) {
       <p className="yield-note">
         <Info size={15} />
         <span>
-          Relative yield compares against the model's unstressed baseline. It is
-          not tonnes or pounds harvested. Absolute harvest estimates require
-          baseline yields and units that this API does not currently return.
+          Harvest weight starts from the county's typical (median) NASS yield
+          and moves up or down with each year's growing conditions. The percent
+          of potential compares against a crop with no water or heat stress.
         </span>
       </p>
       <Timeline blocks={farm.blocks} compact />
@@ -310,131 +310,97 @@ export default function Results({ farm, result, mock, onBack }) {
             ))}
           </div>
         </div>
-        <p className="caption">
-          {unit} · Shaded years are flagged by the backend, not detected by this
-          chart.{mock ? " Demo dips are intentionally constructed." : ""}
-        </p>
-        <div
-          className="chart-wrap"
-          role="img"
-          aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are available in the year table below.`}
-        >
-          <ResponsiveContainer width="100%" height="100%">
-            {chart === "yield" ? (
-              <LineChart
-                data={chartRows}
-                margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 4"
-                  vertical={false}
-                  stroke="#e5e9df"
-                />
-                <XAxis dataKey="year" tick={{ fontSize: 11 }} minTickGap={28} />
-                <YAxis
-                  domain={[0, 100]}
-                  tickFormatter={(v) => `${v}%`}
-                  tick={{ fontSize: 11 }}
-                  width={48}
-                />
-                {flagged.map((y) => (
-                  <ReferenceArea
-                    key={y}
-                    x1={y}
-                    x2={y + 1}
-                    fill="#d7be85"
-                    fillOpacity={0.16}
-                  />
-                ))}
-                <Tooltip
-                  formatter={(v, name) => [`${number(v, 1)}%`, name]}
-                  contentStyle={tooltipStyle}
-                />
-                <Legend
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
-                />
-                {result.blocks.map((b) => (
-                  <Line
-                    key={b.id}
-                    dataKey={b.id}
-                    name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
-                    stroke={CROPS[b.crop]?.color ?? "#557f65"}
-                    strokeWidth={2.5}
-                    dot={false}
-                    activeDot={{ r: 5 }}
-                    isAnimationActive={false}
-                  />
-                ))}
-              </LineChart>
-            ) : (
-              <BarChart
-                data={chartRows}
-                margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
-              >
-                <CartesianGrid
-                  strokeDasharray="3 4"
-                  vertical={false}
-                  stroke="#e5e9df"
-                />
-                <XAxis dataKey="year" tick={{ fontSize: 11 }} minTickGap={28} />
-                <YAxis
-                  tickFormatter={(v) =>
-                    chart === "profit" ? `$${number(v / 1000)}k` : number(v)
-                  }
-                  tick={{ fontSize: 11 }}
-                  width={58}
-                />
-                {flagged.map((y) => (
-                  <ReferenceArea
-                    key={y}
-                    x1={y}
-                    x2={y + 1}
-                    fill="#d7be85"
-                    fillOpacity={0.16}
-                  />
-                ))}
-                <Tooltip
-                  formatter={(v, name) => [
-                    chart === "profit" ? money(v) : `${number(v, 1)} acre-ft`,
-                    name,
-                  ]}
-                  contentStyle={tooltipStyle}
-                />
-                <Legend
-                  iconType="circle"
-                  wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
-                />
-                {chart === "water" ? (
-                  result.blocks.map((b) => (
-                    <Bar
-                      key={b.id}
-                      dataKey={b.id}
-                      name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
-                      stackId="water"
-                      fill={CROPS[b.crop]?.color ?? "#557f65"}
-                      isAnimationActive={false}
-                    />
-                  ))
-                ) : (
-                  <Bar
-                    dataKey="profit"
-                    name="Farm profit"
-                    radius={[3, 3, 0, 0]}
-                    isAnimationActive={false}
+        {chart === "yield" ? (
+          <YieldWeightChart result={result} mock={mock} />
+        ) : (
+          <>
+            <p className="caption">
+              {unit} · Shaded years are flagged by the backend, not detected by
+              this chart.
+              {mock ? " Demo dips are intentionally constructed." : ""}
+            </p>
+            <div
+              className="chart-wrap"
+              role="img"
+              aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are available in the year table below.`}
+            >
+              <ResponsiveContainer width="100%" height="100%">
+                {
+                  <BarChart
+                    data={chartRows}
+                    margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
                   >
-                    {chartRows.map((r) => (
-                      <Cell
-                        key={r.year}
-                        fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
+                    <CartesianGrid
+                      strokeDasharray="3 4"
+                      vertical={false}
+                      stroke="#e5e9df"
+                    />
+                    <XAxis
+                      dataKey="year"
+                      tick={{ fontSize: 11 }}
+                      minTickGap={28}
+                    />
+                    <YAxis
+                      tickFormatter={(v) =>
+                        chart === "profit" ? `$${number(v / 1000)}k` : number(v)
+                      }
+                      tick={{ fontSize: 11 }}
+                      width={58}
+                    />
+                    {flagged.map((y) => (
+                      <ReferenceArea
+                        key={y}
+                        x1={y}
+                        x2={y + 1}
+                        fill="#d7be85"
+                        fillOpacity={0.16}
                       />
                     ))}
-                  </Bar>
-                )}
-              </BarChart>
-            )}
-          </ResponsiveContainer>
-        </div>
+                    <Tooltip
+                      formatter={(v, name) => [
+                        chart === "profit"
+                          ? money(v)
+                          : `${number(v, 1)} acre-ft`,
+                        name,
+                      ]}
+                      contentStyle={tooltipStyle}
+                    />
+                    <Legend
+                      iconType="circle"
+                      wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
+                    />
+                    {chart === "water" ? (
+                      result.blocks.map((b) => (
+                        <Bar
+                          key={b.id}
+                          dataKey={b.id}
+                          name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
+                          stackId="water"
+                          fill={CROPS[b.crop]?.color ?? "#557f65"}
+                          isAnimationActive={false}
+                        />
+                      ))
+                    ) : (
+                      <Bar
+                        dataKey="profit"
+                        name="Farm profit"
+                        radius={[3, 3, 0, 0]}
+                        isAnimationActive={false}
+                      >
+                        {chartRows.map((r) => (
+                          <Cell
+                            key={r.year}
+                            fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
+                          />
+                        ))}
+                      </Bar>
+                    )}
+                  </BarChart>
+                }
+              </ResponsiveContainer>
+            </div>
+          </>
+        )}
         {chart === "profit" && (
           <p className="caption">
             Missing profit remains unavailable, not zero. Farm financial totals
@@ -481,7 +447,14 @@ export default function Results({ farm, result, mock, onBack }) {
                   <br />
                   (acre-ft)
                 </th>
-                <th>Relative yield</th>
+                <th>
+                  Harvest
+                  <br />({unitLabel(yieldUnit, true)})
+                </th>
+                <th>
+                  Total harvest
+                  <br />({unitLabel(yieldUnit, false)})
+                </th>
                 <th>Heat days</th>
                 <th>
                   GDD
@@ -494,6 +467,10 @@ export default function Results({ farm, result, mock, onBack }) {
             <tbody>
               {result.blocks.map((b) => {
                 const r = b.yearly.find((r) => r.year === Number(year));
+                const w = weightRow(weights.get(b.id), Number(year));
+                const pct = potentialPercent(
+                  w?.relative_yield ?? r?.relative_yield,
+                );
                 return (
                   <tr key={b.id}>
                     <th>
@@ -509,7 +486,13 @@ export default function Results({ farm, result, mock, onBack }) {
                     <td>{number(r?.crop_water_use_in, 1)}</td>
                     <td>{number(r?.effective_rain_in, 1)}</td>
                     <td>{number(r?.water_applied_af, 1)}</td>
-                    <td>{percent(r?.relative_yield)}</td>
+                    <td>
+                      {formatWeight(w?.tons_per_acre, yieldUnit, true)}
+                      {pct && (
+                        <small className="potential">{pct} of potential</small>
+                      )}
+                    </td>
+                    <td>{formatWeight(w?.tons, yieldUnit, false)}</td>
                     <td>{number(r?.heat_stress_days)}</td>
                     <td>{number(r?.gdd)}</td>
                     <td>{money(r?.profit)}</td>

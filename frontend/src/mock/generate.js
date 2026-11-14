@@ -1,4 +1,5 @@
 import { DEFAULT_FARM, clone } from "../domain.js";
+import { mockYieldWeight } from "../features/yield/mockYieldWeight.js";
 // Synthetic UI fixtures only. This is not an agronomic or economic model.
 const profiles = {
   almonds: [3.8, 5200, 3900],
@@ -110,11 +111,12 @@ export function generateMock(farm = DEFAULT_FARM) {
       drought_years: years.filter((y) => [2014, 2015, 2021, 2022].includes(y)),
     },
     waste_flags: flags,
+    ...mockYieldWeight(blocks),
     assumptions: [
       "DEMO DATA: all weather effects, yield, water, and financial values are invented for interface testing. No NASA observations were used.",
       "Changing location does not change the synthetic climate. Do not use demo results for a farm decision.",
       "Drought-year dips are deliberately constructed examples, not validation evidence.",
-      "Relative yield is a fraction of a hypothetical unstressed baseline, not tonnes or pounds harvested.",
+      "Relative yield is a fraction of a hypothetical unstressed baseline. Demo harvest weights use illustrative baseline tons per acre, not NASS data.",
       "Best, typical, and worst years in this fixture are ranked by illustrative profit.",
       "The 25% cut is relative to baseline mean modeled applied water. It is not a regulatory allocation.",
       "No actual farm area can be inferred by summing crop entries when multiple crops share the same land.",

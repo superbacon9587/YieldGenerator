@@ -1,6 +1,6 @@
 # Simulate API contract
 
-`POST /api/simulate` runs the backtest for one farm and returns yearly water use, relative yield, and money per block, plus farm totals, a summary, and waste flags.
+`POST /api/simulate` runs the backtest for one farm and returns yearly water use, relative yield, harvest weight, and money per block, plus farm totals, a summary, summary stats, and waste flags.
 
 The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code version of this document. A full sample response is in [example_response.json](example_response.json). Its numbers look realistic, but they were made up for the sample and do not come from the engine.
 
@@ -15,6 +15,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | Money | US dollars, rounded to whole dollars |
 | `gdd` | growing degree days, degree C days |
 | `relative_yield` | fraction, 0 to 1 (1.0 is a full, unstressed yield) |
+| Harvest weight | US tons (2,000 lb), `tons` and `tons_per_acre` |
 
 - **Months wrap around the new year.** `start_month: 11, end_month: 4` means November through April. `start_month: 1, end_month: 12` means year-round (use this for perennials).
 - **Season year.** A season that crosses the new year counts in the year it ends. Oats planted November 2014 and harvested April 2015 are the 2015 season.
@@ -111,7 +112,16 @@ Shortened here. See [example_response.json](example_response.json) for all 25 ye
     "Mature, full-producing orchards.",
     "Weather is regional (NASA POWER grid cell about 50 km wide).",
     "Yield losses from weather and water only."
-  ]
+  ],
+  "yield_weight": [
+    { "block_id": "b3", "crop": "corn", "acres": 15, "source_unit": "BU / ACRE",
+      "conversion": "bu x 56 lb / 2000",
+      "yearly": [
+        { "year": 2000, "tons_per_acre": 4.41, "tons": 66.15, "relative_yield": 0.95 }
+      ],
+      "avg_tons": 64.8, "avg_tons_per_acre": 4.32 }
+  ],
+  "summary_stats": { "avg_yield_tons": 182.4 }
 }
 ```
 
@@ -154,6 +164,40 @@ One entry per year. `water_applied_af` and money are sums over blocks. `relative
 | `worst_year` | int | Lowest by the same ranking |
 | `typical_year` | int | Median year by the same ranking |
 | `drought_years` | int list | Known California drought years (2014, 2015, 2021, 2022) that fall in the requested range. Can be empty |
+
+### `yield_weight[]`
+
+Harvest weight per block, one entry per block in request order. Added in iteration 2 (Part C). Built in `backend/yield_weight.py`.
+
+| Field | Type | Notes |
+|---|---|---|
+| `block_id` | string | Same as `blocks[].id` |
+| `crop` | crop id | |
+| `acres` | number | |
+| `source_unit` | string or null | Unit of the NASS baseline yield, such as `"BU / ACRE"`. `null` when the crop has no baseline yield |
+| `conversion` | string or null | Short text such as `"lb / 2000"`, `"bu x 56 lb / 2000"`, or `"already tons"`. `null` when there is no weight |
+| `yearly[].year` | int | Same order as `years` |
+| `yearly[].tons_per_acre` | number or null | US tons per acre (see the formula below) |
+| `yearly[].tons` | number or null | `tons_per_acre` x `acres` |
+| `yearly[].relative_yield` | 0 to 1 | Same value as `blocks[].yearly[].relative_yield` |
+| `avg_tons` | number or null | Mean of `yearly[].tons` |
+| `avg_tons_per_acre` | number or null | Mean of `yearly[].tons_per_acre` |
+
+**Formula.** The baseline yield from the location context is converted to tons per acre (`backend/units.py`: `LB / ACRE` divided by 2000, `BU / ACRE` times the crop's bushel weight (corn 56 lb, oats 32 lb, wheat 60 lb) divided by 2000, `TONS / ACRE` unchanged). The county median yield already reflects a typical year, not a perfect one, so each year is scaled against the block's median relative yield over all backtest years:
+
+```
+tons_per_acre = baseline_tons_per_acre x relative_yield / median(relative_yield of this block)
+```
+
+A typical year shows the typical county harvest, drought years show less, and good years show a bit more. The weights are `null` when the crop has no baseline yield, its unit cannot be converted, or the median relative yield is 0. A note goes into `assumptions` in each case.
+
+Other code (scenario comparisons, the optimizer) should call `tons_per_acre_by_year(crop, location, relative_yields)` in `backend/yield_weight.py` so every part of the app uses the same conversion.
+
+### `summary_stats`
+
+| Field | Type | Notes |
+|---|---|---|
+| `avg_yield_tons` | number or null | Average over years of the farm's total harvest weight in US tons. Each year adds up the blocks that have a weight (left-out blocks are named in `assumptions`). `null` when no block has a weight |
 
 ### `waste_flags[]`
 
