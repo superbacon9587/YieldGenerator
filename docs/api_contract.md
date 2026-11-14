@@ -240,7 +240,7 @@ The response now includes `comparisons` (an empty list when no alternatives can 
 
 Numbers above illustrate the shape; they are not measured results.
 
-- Each alternative changes exactly one entry, retaining its acres, crop, location, years, price mode, and optional inputs. The whole farm is simulated using the existing engine and the same weather/context, with nested comparisons disabled.
+- Each alternative changes exactly one entry, retaining its acres, crop, location, years, price mode, and optional inputs. With a water cap, the whole farm is simulated using the existing engine and the same weather/context, with nested comparisons disabled. Without a cap, entries are independent, so only the changed entry is simulated at its actual acreage; tests confirm it matches a full-farm rerun.
 - Metrics describe the **changed crop entry**, not total farm differences. Farm water allocation is recalculated, so other entries can also change under a water cap; the exclusion note explicitly flags this. Profit and water changes are alternative minus current. Relative yield change is in **percentage points**, not harvested weight. Worst-year change is the alternative's minimum profit minus the current minimum; these minima may occur in different years.
 - Financial differences are null unless profit is available for that entry in both setups in every compared year. Null means unavailable, never zero. The UI can display `No price data`.
 - Within each block, rows are ordered by average profit change descending, with nulls last. This is ordering, not advice or a suitability ranking.

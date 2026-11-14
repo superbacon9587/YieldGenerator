@@ -65,6 +65,12 @@ def build_comparisons(farm, baseline_response, *, wx=None, context=None):
         for kind, changed in _alternatives(block):
             candidate = farm.model_copy(deep=True)
             candidate.blocks[index] = changed
+            # With no shared water cap, entries are independent in this engine.
+            # Evaluate only the changed entry, with its actual acreage, to avoid
+            # recomputing unchanged daily balances. Capped farms still rerun all
+            # entries because their allocation and yields can change together.
+            if farm.optional.water_available_af is None:
+                candidate.blocks = [changed]
             try:
                 response = engine.simulate(candidate, wx=wx, context=context, include_comparisons=False)
             except engine.WeatherUnavailableError:

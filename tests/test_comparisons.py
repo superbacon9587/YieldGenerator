@@ -48,8 +48,9 @@ def test_planting_windows_wrap_and_perennials(monkeypatch):
     assert all(r.crop == "oats" for r in planting)
 
 
-def test_capped_comparison_matches_full_farm_rerun():
-    request, weather, context = farm(cap=50), make_weather(), make_context()
+@pytest.mark.parametrize("cap", [None, 50])
+def test_comparison_matches_full_farm_rerun(cap):
+    request, weather, context = farm(cap=cap), make_weather(), make_context()
     baseline = engine.simulate(request, wx=weather, context=context)
     row = next(r for r in baseline.comparisons if r.block_id == "corn" and r.alternative.irrigation == "drip")
     changed = request.model_copy(deep=True)
@@ -59,8 +60,11 @@ def test_capped_comparison_matches_full_farm_rerun():
     alternative = actual.blocks[2].yearly
     assert row.avg_water_change_af == pytest.approx(sum(b.water_applied_af-a.water_applied_af for a,b in zip(original, alternative))/len(original), abs=.001)
     assert row.avg_relative_yield_change_pts == pytest.approx(100*sum(b.relative_yield-a.relative_yield for a,b in zip(original, alternative))/len(original), abs=.001)
-    assert all(y.water_applied_af <= 50.1 for y in actual.farm_totals)
-    assert "redistribution" in row.excludes
+    assert row.avg_profit_change == pytest.approx(sum(b.profit-a.profit for a,b in zip(original, alternative))/len(original), abs=.01)
+    assert row.worst_year_profit_change == min(b.profit for b in alternative)-min(a.profit for a in original)
+    if cap is not None:
+        assert all(y.water_applied_af <= cap+.1 for y in actual.farm_totals)
+        assert "redistribution" in row.excludes
 
 
 def test_external_data_loaded_once(monkeypatch):
