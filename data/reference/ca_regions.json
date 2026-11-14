@@ -1,0 +1,109 @@
+{
+  "_source": "County to cost region grouping built by the YieldGenerator team to match how UC Davis Cooperative Extension cost studies (coststudies.ucdavis.edu) label their regions: Sacramento Valley, Northern and Southern San Joaquin Valley, Central Coast, Southern California (Imperial and coastal south), North Coast, and Intermountain/Sierra (here 'Mountain'). Judgment calls: Placer and Shasta go to Sacramento Valley because their farmland is on the valley floor; Madera goes to San Joaquin Valley South with Fresno; Alameda and Contra Costa go to Central Coast with the other Bay Area counties.",
+  "_county_names": "Census county BASENAME without the word 'County', for example 'San Luis Obispo'.",
+  "regions": [
+    "Sacramento Valley",
+    "San Joaquin Valley North",
+    "San Joaquin Valley South",
+    "Central Coast",
+    "Southern California",
+    "North Coast",
+    "Mountain"
+  ],
+  "nearest_regions": {
+    "Sacramento Valley": [
+      "San Joaquin Valley North",
+      "San Joaquin Valley South"
+    ],
+    "San Joaquin Valley North": [
+      "Sacramento Valley",
+      "San Joaquin Valley South"
+    ],
+    "San Joaquin Valley South": [
+      "San Joaquin Valley North",
+      "Sacramento Valley"
+    ],
+    "Central Coast": [
+      "San Joaquin Valley North",
+      "San Joaquin Valley South",
+      "Sacramento Valley"
+    ],
+    "Southern California": [
+      "San Joaquin Valley South",
+      "Central Coast",
+      "San Joaquin Valley North",
+      "Sacramento Valley"
+    ],
+    "North Coast": [
+      "Sacramento Valley",
+      "San Joaquin Valley North",
+      "San Joaquin Valley South"
+    ],
+    "Mountain": [
+      "Sacramento Valley",
+      "San Joaquin Valley North",
+      "San Joaquin Valley South"
+    ]
+  },
+  "_nearest_regions": "Fallback order used when a region has no cost study for a crop. San Joaquin Valley North is the final default.",
+  "counties": {
+    "Alameda": "Central Coast",
+    "Alpine": "Mountain",
+    "Amador": "Mountain",
+    "Butte": "Sacramento Valley",
+    "Calaveras": "Mountain",
+    "Colusa": "Sacramento Valley",
+    "Contra Costa": "Central Coast",
+    "Del Norte": "North Coast",
+    "El Dorado": "Mountain",
+    "Fresno": "San Joaquin Valley South",
+    "Glenn": "Sacramento Valley",
+    "Humboldt": "North Coast",
+    "Imperial": "Southern California",
+    "Inyo": "Mountain",
+    "Kern": "San Joaquin Valley South",
+    "Kings": "San Joaquin Valley South",
+    "Lake": "North Coast",
+    "Lassen": "Mountain",
+    "Los Angeles": "Southern California",
+    "Madera": "San Joaquin Valley South",
+    "Marin": "North Coast",
+    "Mariposa": "Mountain",
+    "Mendocino": "North Coast",
+    "Merced": "San Joaquin Valley North",
+    "Modoc": "Mountain",
+    "Mono": "Mountain",
+    "Monterey": "Central Coast",
+    "Napa": "North Coast",
+    "Nevada": "Mountain",
+    "Orange": "Southern California",
+    "Placer": "Sacramento Valley",
+    "Plumas": "Mountain",
+    "Riverside": "Southern California",
+    "Sacramento": "Sacramento Valley",
+    "San Benito": "Central Coast",
+    "San Bernardino": "Southern California",
+    "San Diego": "Southern California",
+    "San Francisco": "Central Coast",
+    "San Joaquin": "San Joaquin Valley North",
+    "San Luis Obispo": "Central Coast",
+    "San Mateo": "Central Coast",
+    "Santa Barbara": "Central Coast",
+    "Santa Clara": "Central Coast",
+    "Santa Cruz": "Central Coast",
+    "Shasta": "Sacramento Valley",
+    "Sierra": "Mountain",
+    "Siskiyou": "Mountain",
+    "Solano": "Sacramento Valley",
+    "Sonoma": "North Coast",
+    "Stanislaus": "San Joaquin Valley North",
+    "Sutter": "Sacramento Valley",
+    "Tehama": "Sacramento Valley",
+    "Trinity": "Mountain",
+    "Tulare": "San Joaquin Valley South",
+    "Tuolumne": "Mountain",
+    "Ventura": "Southern California",
+    "Yolo": "Sacramento Valley",
+    "Yuba": "Sacramento Valley"
+  }
+}

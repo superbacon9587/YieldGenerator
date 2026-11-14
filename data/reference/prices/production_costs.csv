@@ -1,0 +1,12 @@
+crop,region,study_year,cost_per_acre,water_cost_per_acre,cost_excl_water,unit,source
+alfalfa_hay,Sacramento Valley,2020,1107.0,350.0,757.0,$/acre,alfalfa_sjv_north_sacramento_2020.pdf p. 16
+alfalfa_hay,San Joaquin Valley North,2020,1107.0,350.0,757.0,$/acre,alfalfa_sjv_north_sacramento_2020.pdf p. 16
+alfalfa_hay,California statewide (organic),2020,886.0,350.0,536.0,$/acre,alfalfa_sjv_south_2016.pdf p. 16
+almonds,Sacramento Valley,2024,3720.0,637.0,3083.0,$/acre,almonds_sacramento_valley_2022.pdf p. 19
+almonds,San Joaquin Valley South,2024,5078.0,1931.0,3147.0,$/acre,almonds_sjv_south_2024.pdf p. 18
+corn,Sacramento Valley,2015,1118.0,168.0,950.0,$/acre,corn_sjv_north_sacramento_2015.pdf p. 11
+corn,San Joaquin Valley North,2015,1118.0,168.0,950.0,$/acre,corn_sjv_north_sacramento_2015.pdf p. 11
+corn,San Joaquin Valley South,2015,1204.0,330.0,874.0,$/acre,corn_sjv_south_2015.pdf p. 10
+processing_tomatoes,San Joaquin Valley South,2018,3345.0,635.0,2710.0,$/acre,tomatoes_processing_sjv_south_2018.pdf p. 14
+walnuts,Sacramento Valley,2022,3422.0,600.0,2822.0,$/acre,walnuts_sacramento_valley_2022.pdf p. 18
+walnuts,San Joaquin Valley South,2023,2913.0,450.0,2463.0,$/acre,walnuts_sjv_south_2023.pdf.pdf p. 17

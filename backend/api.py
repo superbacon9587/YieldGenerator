@@ -6,6 +6,7 @@ Run with:
 Endpoints:
     GET /api/geocode?q=...          list of {label, lat, lon}
     GET /api/weather?lat=..&lon=..  cached daily POWER data plus FAO-56 ET0
+    GET /api/context?lat=..&lon=..  county, cost region, baseline yields, costs, water price
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ import requests
 from fastapi import FastAPI, HTTPException, Query
 
 from backend import geocode as geocode_mod
-from backend import power_client
+from backend import power_client, regions
 from backend.et0 import et0_fao56
 
 app = FastAPI(title="YieldGenerator API")
@@ -61,3 +62,13 @@ def weather(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-
         "dates": df.index.strftime("%Y-%m-%d").tolist(),
         "data": {col: _clean(df[col].tolist()) for col in df.columns},
     }
+
+
+@app.get("/api/context")
+def context(lat: float = Query(..., ge=-90, le=90), lon: float = Query(..., ge=-180, le=180)) -> dict:
+    """State, county, cost region, baseline yields, production costs and water price
+    for a point. Shape is documented in backend/regions.py."""
+    try:
+        return regions.get_location_context(lat, lon)
+    except requests.RequestException as exc:
+        raise HTTPException(status_code=502, detail=f"Census Geocoder error: {exc}") from exc
