@@ -62,7 +62,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 
-from backend import frost, reference, simulate as engine, units, yield_weight
+from backend import calculations, frost, reference, simulate as engine, units, yield_weight
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
@@ -539,6 +539,11 @@ def blocks_out(blocks: list[BlockIn], resp: SimulateResponse) -> list[OptimizeBl
     return out
 
 
+def part_records(blocks: list[BlockIn], resp: SimulateResponse, ctx: dict) -> dict:
+    """Calculation records for one plan card: whole-period numbers plus each block."""
+    return {**resp.calculations, **calculations.plan_block_records(blocks, resp, ctx)}
+
+
 def _close(engine_value: float | None, predicted: float, abs_tol: float) -> bool:
     if engine_value is None:
         return False
@@ -787,7 +792,8 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
     if req.current_farm is not None:
         resp = run_engine(req, req.current_farm.blocks, wx, ctx)
         current = OptimizeCurrentFarmOut(blocks=blocks_out(req.current_farm.blocks, resp),
-                                         summary_stats=resp.summary_stats, budget=resp.budget)
+                                         summary_stats=resp.summary_stats, budget=resp.budget,
+                                         calculations=part_records(req.current_farm.blocks, resp, ctx))
 
     problem = build_problem(req, wx, ctx)
 
@@ -820,7 +826,7 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
         return respond("error", error_detail=" ".join(issues))
 
     plan = OptimizePlanOut(blocks=blocks_out(blocks, resp), summary_stats=resp.summary_stats,
-                           budget=resp.budget, land=resp.land)
+                           budget=resp.budget, land=resp.land, calculations=part_records(blocks, resp, ctx))
     diff = None
     if current is not None:
         p, c = plan.summary_stats, current.summary_stats
@@ -829,10 +835,12 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
             avg_yield_tons=_diff(p.avg_yield_tons, c.avg_yield_tons, 2),
             avg_water_applied_af=_diff(p.avg_water_applied_af, c.avg_water_applied_af, 1),
             avg_cost=_diff(p.avg_cost, c.avg_cost, 0))
+        diff_records = calculations.difference_records(p, c, plan.calculations, current.calculations)
 
     alternatives = build_alternatives(problem, sol, resp, wx, ctx)
     return respond(
         sol.status, plan=plan, difference_vs_current=diff, alternatives=alternatives,
+        calculations=diff_records if current is not None else {},
         binding_constraints=binding_sentences(problem, sol),
         assumptions=list(dict.fromkeys(optimizer_notes(problem) + resp.assumptions)))
 
@@ -872,5 +880,6 @@ def build_alternatives(problem: Problem, best: Solution, best_resp: SimulateResp
         seen.add(stats)
         out.append(OptimizeAlternativeOut(
             label=f"Alternative {len(out) + 1}", blocks=blocks_out(blocks, resp),
-            summary_stats=resp.summary_stats, budget=resp.budget))
+            summary_stats=resp.summary_stats, budget=resp.budget,
+            calculations=part_records(blocks, resp, ctx)))
     return out

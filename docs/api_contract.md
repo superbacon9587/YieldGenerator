@@ -519,3 +519,25 @@ The payload contains the model/data commit, financial coverage and exclusions, a
 **Costs are estimates, not farmer expenses.** They use the context-selected regional cost study excluding water, multiplied by acreage, plus modeled water cost. The study is held fixed across weather years, with no inflation adjustment. `optional.budget_usd` is a budget constraint/check, never an expense observation or a replacement for production cost. No actual-cost override was added here.
 
 Dollar totals still include only entries with all required financial inputs. Harvest/water totals can have broader coverage; `excluded_financial_blocks` makes that explicit. These dollar values are modeled margins on priced crops, not verified net farm income. The audit surfaces conflicting cost study year versus PDF-filename metadata as provisional instead of claiming it was verified. Tracing sources is separate from validating predictive accuracy.
+
+## Calculation records (`calculations`)
+
+Every number the UI shows with an information button has a record, keyed by id. `POST /api/simulate` returns them in `calculations`; `POST /api/compare` returns the whole-period ones on each result; `POST /api/optimize` returns them on `plan`, `current_farm` and each alternative, and the plan minus current farm ones at the top level.
+
+```json
+{
+  "id": "summary.avg_yield_tons",
+  "label": "Estimated harvest per year",
+  "value": 3876.82, "unit": "tons", "decimals": 2,
+  "formula_text": "Sum over crops of (average harvest per acre x acres), averaged over 2000 to 2024",
+  "is_estimate": true,
+  "steps": [{"text": "Almonds: 1.16 tons/acre x 40 acres = 46.4 tons", "expr": "1.16*40", "result": 46.4}],
+  "inputs": [{"name": "Almonds area", "value": 40, "unit": "acres", "source": "Farmer input",
+              "source_url": null, "kind": "farmer", "is_estimate": false,
+              "estimate_reason": null, "not_estimate_reason": null}]
+}
+```
+
+Ids: `summary.<field>` (avg_profit, avg_cost, avg_revenue, total_profit, avg_relative_yield, avg_water_applied_af, avg_yield_tons, best_year, worst_year, worst_profit, years_over_budget), `block.<id>.<year>.<field>` (crop_water_use_in, effective_rain_in, water_applied_af, relative_yield, tons_per_acre, tons, heat_stress_days, gdd, profit), `table.<farm|block id>.<total|per_acre>.<metric>` (Average row of the data table under each chart: harvest, sales, cost, margin, margin_pct, water, yield), optimizer `block.<id>.avg_profit`, `block.<id>.avg_yield_tons`, and `difference.<field>`.
+
+Rules (tests/test_calculation_records.py): each step's `expr` uses only the numbers printed in its `text` and re-evaluates to `result`; the last result equals `value`, which equals the number in the response. `value` is in the display unit (percent values are x 100). Input `kind` is farmer, nasa or nass for reported data; anything else is either `is_estimate` with an `estimate_reason` or has a `not_estimate_reason` (for example a physical constant). Records with no value (missing prices) are left out.

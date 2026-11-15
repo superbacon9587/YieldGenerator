@@ -16,6 +16,8 @@ import {
   toUnit,
   unitLabel,
 } from "../yield/yieldUnits.js";
+import ChartDataTable from "./ChartDataTable.jsx";
+import { blockLabel } from "../yield/yieldData.js";
 import "./summary.css";
 
 /** One small chart per crop entry: total harvest weight per year, from yield_weight. */
@@ -92,6 +94,14 @@ export default function ProductionChart({ result }) {
                 Not available: no baseline yield for this crop here.
               </div>
             )}
+            <ChartDataTable
+              result={result}
+              scope={w.block_id}
+              title={blockLabel(
+                result.blocks.find((b) => b.id === w.block_id) ?? { crop: w.crop, id: w.block_id },
+                result.blocks,
+              )}
+            />
           </div>
         );
       })}

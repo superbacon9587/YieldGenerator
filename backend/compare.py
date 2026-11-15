@@ -43,7 +43,7 @@ def compare(req: CompareRequest) -> CompareResponse:
     ranks = rank(values, req.ranked_by in LOWER_IS_FIRST)
     results = [
         CompareResultOut(name=c.name.strip(), summary_stats=r.summary_stats,
-                         budget=r.budget, rank=k)
+                         budget=r.budget, rank=k, calculations=r.calculations)
         for c, r, k in zip(req.configs, responses, ranks)
     ]
     order = sorted(range(len(results)), key=lambda i: (results[i].rank, i))

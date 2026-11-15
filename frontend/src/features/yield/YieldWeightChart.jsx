@@ -27,6 +27,7 @@ import {
   labelsFit,
   weightByBlock,
 } from "./yieldData.js";
+import ChartDataTable from "../summary/ChartDataTable.jsx";
 import "./yield.css";
 
 const ALL = "__all__";
@@ -240,6 +241,12 @@ export default function YieldWeightChart({ result, mock }) {
           {missing.map((b) => blockLabel(b, blocks)).join(", ")}.
         </p>
       )}
+      <ChartDataTable
+        result={result}
+        scope={selected === ALL ? "farm" : selected}
+        perAcre={perAcre}
+        title={selected === ALL ? "Whole farm" : blockLabel(selectedBlock, blocks)}
+      />
     </div>
   );
 }

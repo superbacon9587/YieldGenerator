@@ -43,7 +43,7 @@ def test_compare_ranks_by_profit_by_default(client):
     assert names == ["Drip corn", "Flood corn"]  # drip pays less for water
     assert [x["rank"] for x in data["results"]] == [1, 2]
     for x in data["results"]:
-        assert set(x) == {"name", "summary_stats", "budget", "rank"}
+        assert set(x) == {"name", "summary_stats", "budget", "rank", "calculations"}
         assert x["summary_stats"]["years_count"] == 4
 
 

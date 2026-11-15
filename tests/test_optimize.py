@@ -479,9 +479,9 @@ def test_optimize_endpoint_shape_and_validation(monkeypatch):
     data = resp.json()
     assert set(data) == {"status", "objective", "plan", "current_farm", "difference_vs_current",
                          "alternatives", "binding_constraints", "infeasible_reason",
-                         "error_detail", "options_considered", "assumptions"}
-    assert set(data["plan"]) == {"blocks", "summary_stats", "budget", "land"}
-    assert set(data["current_farm"]) == {"blocks", "summary_stats", "budget"}
+                         "error_detail", "options_considered", "assumptions", "calculations"}
+    assert set(data["plan"]) == {"blocks", "summary_stats", "budget", "land", "calculations"}
+    assert set(data["current_farm"]) == {"blocks", "summary_stats", "budget", "calculations"}
     assert set(data["plan"]["blocks"][0]) == {"id", "crop", "acres", "irrigation", "start_month",
                                               "end_month", "avg_profit", "avg_yield_tons"}
     assert set(data["difference_vs_current"]) == {"avg_profit", "avg_yield_tons",

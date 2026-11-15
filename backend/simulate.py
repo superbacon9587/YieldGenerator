@@ -751,7 +751,10 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
         response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
     from backend import summary
     response = summary.add_to_response(response, request, ctx)
+    from backend import calculations
     if include_comparisons:
-        from backend import calculations
         response.calculation_details = calculations.build(bt, response, wx)
+        response.calculations = calculations.simulate_records(bt, response, wx)
+    else:  # compare and optimize only show whole-period numbers
+        response.calculations = calculations.summary_records(response, request, ctx)
     return response

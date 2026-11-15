@@ -1,5 +1,5 @@
 import { Wheat } from "lucide-react";
-import { MetricInfo } from "../provenance/CalculationDetails.jsx";
+import { CalcInfo } from "../provenance/CalcPopover.jsx";
 import { percent } from "../../domain.js";
 import { useYieldUnit } from "./YieldUnitContext.jsx";
 import { formatWeightNumber, unitLabel } from "./yieldUnits.js";
@@ -17,7 +17,10 @@ export default function HarvestCard({ result, relativeYield }) {
     <div className="metric harvest-metric">
       <span className="metric-label">
         Estimated harvest per year
-        <MetricInfo metric="harvest" label="average annual harvest" />
+        <CalcInfo
+          id="summary.avg_yield_tons"
+          display={value == null ? undefined : `${value} ${unitLabel(unit, false)}`}
+        />
         <Wheat size={17} />
       </span>
       <strong>

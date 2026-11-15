@@ -22,6 +22,7 @@ import {
   settingsOf,
 } from "./optimizePlan.js";
 import { optimize } from "./optimizeApi.js";
+import { CalcInfo, CalcRecords } from "../provenance/CalcPopover.jsx";
 import "../compare/compare.css";
 import "./optimize.css";
 
@@ -211,17 +212,22 @@ function Inputs({ farm, setFarm }) {
   );
 }
 
-function Difference({ diff }) {
+function Difference({ diff, records }) {
   return (
+    <CalcRecords records={records}>
     <div className="opt-diff" aria-label="Plan minus current farm">
       <span className="opt-diff-title">Plan minus current farm, per year</span>
       {differenceCells(diff).map((c) => (
         <div key={c.key} className={c.tone}>
           <span>{c.label}</span>
-          <strong>{signed(c.value, DIFF_FORMAT[c.key])}</strong>
+          <strong>
+            {signed(c.value, DIFF_FORMAT[c.key])}
+            <CalcInfo id={`difference.${c.key}`} display={signed(c.value, DIFF_FORMAT[c.key])} weightUnit="tons" />
+          </strong>
         </div>
       ))}
     </div>
+    </CalcRecords>
   );
 }
 
@@ -286,7 +292,7 @@ function Results({ result, farm, mock, onBacktest }) {
               tone="plan"
             />
           </div>
-          {result.difference_vs_current && <Difference diff={result.difference_vs_current} />}
+          {result.difference_vs_current && <Difference diff={result.difference_vs_current} records={result.calculations} />}
           <section className="panel">
             <div className="panel-heading">
               <div>
