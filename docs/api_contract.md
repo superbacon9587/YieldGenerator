@@ -64,7 +64,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | `optional.soil` | `"sand"`, `"loam"`, `"clay"` | no, default `"loam"` | |
 | `optional.water_available_af` | number or null | no | Cap on total farm water per year. Split across blocks in proportion to need, and crops run short when it binds |
 | `optional.water_applied_af` | number or null | no | What the farmer says they actually apply per year. Used for the `over_applied` waste flag |
-| `optional.surface_water_share` | 0 to 1 | no, default 0.5 | Share of applied water from surface water. The rest is pumped groundwater |
+| `optional.surface_water_share` | 0 to 1 | no, default 0.5 | Share of applied water from surface water. The rest is pumped groundwater. Each acre-ft is charged once: water cost = acre-ft x share x surface price + acre-ft x (1 - share) x lift x 1.024 / efficiency x $/kWh. The form's Water source selector sets it (Surface water = 1, Well = 0, Mix). When the request leaves it out, the 0.5 default is marked as an estimate in the calculation records. `/api/optimize` takes the same field |
 | `optional.budget_usd` | number or null | no, default null | Yearly operating budget in dollars. `null` means no budget. Used for the `budget` check |
 | `available_acres` | number | yes for new clients | Total land the farm has, greater than 0. If missing, it defaults to the sum of block acres so older clients still work. Used for the `land` check |
 
@@ -510,6 +510,10 @@ Numbers above are from one run on cached Merced weather and show the shape only.
 5. **Not included.** Installation cost for a new irrigation system and orchard establishment: new orchards take 3 to 5 years to bear, and establishment costs are not modeled. Frost does not lower modeled yields; it is used only to leave out frost sensitive planting windows (see Frost check).
 6. **Errors.** A `current_farm` season outside the weather record gets a `422`, like `/api/simulate`. Data service failures get a `502`.
 
+
+## Water model
+
+One shared FAO-56 root zone water balance for every crop (`simulate.water_balance`). Starting soil water on the planting day comes from NASA POWER GWETPROF (profile soil wetness, the fraction of pore space filled): theta = GWETPROF x porosity, and the root zone starts at TAW x clamp((theta - theta_wp) / (theta_fc - theta_wp), 0, 1), with porosity (Rawls, Brakensiek and Saxton 1982) and field capacity / wilting point (FAO-56 Table 19 midpoints) from `data/reference/soils.json`. A missing GWETPROF value starts the root zone full and is flagged as an estimate. During the season the root zone is refilled whenever depletion passes half of TAW, and the deficit left on the last day is refilled too and counted as irrigation, so water applied is crop ET minus stored rain plus the starting deficit, whatever day the last refill fell on. Gross water applied = net / irrigation efficiency. The water and cost records cite GWETPROF, the soil values, the starting share, and the end-of-season refill.
 
 ## Calculation details and financial interpretation
 

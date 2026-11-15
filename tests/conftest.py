@@ -83,6 +83,7 @@ def real_merced_weather():
     df = pd.read_csv(path, comment="#", index_col="date", parse_dates=True)
     df.attrs = attrs
     out = pd.DataFrame({"tmax_c": df["tmax_c"], "tmin_c": df["tmin_c"],
-                        "precip_mm_day": df["precip_mm_day"], "et0_mm_day": et0_fao56(df)})
+                        "precip_mm_day": df["precip_mm_day"], "et0_mm_day": et0_fao56(df),
+                        "soil_wetness_frac": df["root_zone_wetness_frac"]})
     out.attrs = {"lat": attrs["lat"], "lon": attrs["lon"], "elevation_m": attrs.get("elevation_m")}
     return out

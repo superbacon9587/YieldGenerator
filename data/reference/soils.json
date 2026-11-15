@@ -2,20 +2,84 @@
   "_note": "PLACEHOLDER VALUES. Available water capacity (field capacity minus wilting point) in mm of water per m of root zone. Check every value against its source before use.",
   "sand": {
     "awc_mm_per_m": 80,
-    "range_mm_per_m": [50, 110],
+    "range_mm_per_m": [
+      50,
+      110
+    ],
     "source": "FAO-56 Table 19 (theta_FC minus theta_WP for sand, 0.05 to 0.11 m3/m3); value is the range midpoint",
-    "verify": true
+    "verify": true,
+    "theta_fc": {
+      "value": 0.12,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for sand: 0.07 to 0.17 m3/m3",
+      "verify": true
+    },
+    "theta_wp": {
+      "value": 0.045,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for sand: 0.02 to 0.07 m3/m3",
+      "verify": true
+    },
+    "porosity": {
+      "value": 0.437,
+      "unit": "m3/m3",
+      "source": "Rawls, Brakensiek and Saxton (1982), Estimation of soil water properties, Trans. ASAE 25(5): 1316-1320, Table 2 total porosity for sand",
+      "verify": true
+    }
   },
   "loam": {
     "awc_mm_per_m": 155,
-    "range_mm_per_m": [110, 200],
+    "range_mm_per_m": [
+      110,
+      200
+    ],
     "source": "FAO-56 Table 19 (theta_FC minus theta_WP for loam, 0.11 to 0.20 m3/m3); value is the range midpoint",
-    "verify": true
+    "verify": true,
+    "theta_fc": {
+      "value": 0.25,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for loam: 0.2 to 0.3 m3/m3",
+      "verify": true
+    },
+    "theta_wp": {
+      "value": 0.12,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for loam: 0.07 to 0.17 m3/m3",
+      "verify": true
+    },
+    "porosity": {
+      "value": 0.463,
+      "unit": "m3/m3",
+      "source": "Rawls, Brakensiek and Saxton (1982), Estimation of soil water properties, Trans. ASAE 25(5): 1316-1320, Table 2 total porosity for loam",
+      "verify": true
+    }
   },
   "clay": {
     "awc_mm_per_m": 160,
-    "range_mm_per_m": [120, 200],
+    "range_mm_per_m": [
+      120,
+      200
+    ],
     "source": "FAO-56 Table 19 (theta_FC minus theta_WP for clay, 0.12 to 0.20 m3/m3); value is the range midpoint",
-    "verify": true
-  }
+    "verify": true,
+    "theta_fc": {
+      "value": 0.36,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for clay: 0.32 to 0.4 m3/m3",
+      "verify": true
+    },
+    "theta_wp": {
+      "value": 0.22,
+      "unit": "m3/m3",
+      "source": "FAO-56 Table 19 (Allen et al. 1998), midpoint of the range for clay: 0.2 to 0.24 m3/m3",
+      "verify": true
+    },
+    "porosity": {
+      "value": 0.475,
+      "unit": "m3/m3",
+      "source": "Rawls, Brakensiek and Saxton (1982), Estimation of soil water properties, Trans. ASAE 25(5): 1316-1320, Table 2 total porosity for clay",
+      "verify": true
+    }
+  },
+  "_note_soil_water": "theta_fc, theta_wp and porosity convert NASA POWER GWETPROF soil wetness (fraction of pore space filled) to volumetric water: theta = GWETPROF x porosity. Starting soil water = TAW x clamp((theta - theta_wp) / (theta_fc - theta_wp), 0, 1)."
 }

@@ -648,15 +648,29 @@ def binding_sentences(problem: Problem, sol: Solution) -> list[str]:
     breaking it (acres move in steps, so a binding limit can keep a sliver of slack)."""
     req = problem.request
     used = sol.acres > 0
-    hits: dict[str, list] = {}
-    for r in sol.rows:
-        if r.kind in ("cut", "keep") or not math.isfinite(r.ub):
-            continue
-        step = r.coeffs[used & (r.coeffs > 0)] * ACRE_STEP
-        if step.size == 0:
-            continue
+    rows = [r for r in sol.rows if r.kind not in ("cut", "keep") and math.isfinite(r.ub)]
+
+    def blocks(r):
+        """Planted options that one more acre step would push past row r."""
         slack = r.ub - float(r.coeffs @ sol.acres)
-        if slack < step.min() - BINDING_REL_TOL * max(1.0, abs(r.ub)):
+        tol = BINDING_REL_TOL * max(1.0, abs(r.ub))
+        return used & (r.coeffs > 0) & (slack < r.coeffs * ACRE_STEP - tol)
+
+    blocked = {id(r): blocks(r) for r in rows}
+    hits: dict[str, list] = {}
+    for r in rows:
+        touched = used & (r.coeffs > 0)
+        if not touched.any():
+            continue
+        # Options a different kind of limit already stops from growing (say, a crop at its
+        # share cap) do not decide whether this one binds.
+        others = np.zeros_like(used)
+        for r2 in rows:
+            if r2.kind != r.kind:
+                others |= blocked[id(r2)]
+        free = touched & ~others
+        candidates = free if free.any() else touched
+        if (blocked[id(r)] | ~candidates)[candidates].all():
             hits.setdefault(r.kind, []).append(r.label)
     out = []
     if "land" in hits:

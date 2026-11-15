@@ -130,7 +130,8 @@ def test_per_acre_results_come_from_the_engine_and_are_cached(monkeypatch):
     assert tom.months == (5, 6, 7, 8, 9)
     np.testing.assert_allclose(tom.relative_yield, [y.relative_yield for y in yearly], atol=5e-4)
     np.testing.assert_allclose(tom.water, [y.water_applied_af for y in yearly], atol=0.05)
-    np.testing.assert_allclose(tom.cost, [y.cost for y in yearly], atol=0.5)
+    # The engine rounds each cost part to $0.01 and the total to $1; the option is exact.
+    np.testing.assert_allclose(tom.cost, [y.cost for y in yearly], atol=1.0)
     np.testing.assert_allclose(tom.tons, [y.tons_per_acre for y in one.yield_weight[0].yearly], atol=5e-4)
     calls = []
     real = engine.run_backtest
@@ -225,12 +226,13 @@ def test_profit_per_af_matches_best_single_option_ratio():
     assert s.avg_profit / s.avg_water_applied_af == pytest.approx(ratio[best_key], rel=2e-3)
 
 
-def test_profit_per_af_with_dry_farmed_option():
-    # Synthetic winters are wet, so oats never need irrigation water.
+def test_profit_per_af_prefers_the_nearly_rain_fed_option():
+    # Synthetic winters are wet, so oats need almost no water: only the soil deficit left
+    # at harvest is refilled. That gives them by far the most profit per acre-foot.
     r = run(objective="profit_per_af")
-    assert r.plan.summary_stats.avg_water_applied_af == 0
     assert {b.crop for b in r.plan.blocks} == {"oats"}
-    assert opt.ZERO_WATER_NOTE in r.assumptions
+    acres = sum(b.acres for b in r.plan.blocks)
+    assert 0 < r.plan.summary_stats.avg_water_applied_af / acres < 0.2
 
 
 def test_production_value_coefficients_use_current_prices(monkeypatch):

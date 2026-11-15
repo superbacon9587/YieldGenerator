@@ -379,12 +379,46 @@ def harvest_ops(rec, b, ry, typical, ctx, blocks, with_acres, season):
     return text, ops, expr
 
 
+DEFAULT_SHARE_REASON = ("Default 50/50 surface/well split (team assumption); choose your water source on the form")
+
+
 def share_input(rec, req):
     share = req.optional.surface_water_share
     if "surface_water_share" in req.optional.model_fields_set:
         return rec.inp("Surface water share", share, "fraction", FARMER, kind="farmer")
     return rec.inp("Surface water share", share, "fraction", sources.surface_share_default(share),
-                   "reference", f"Default assumption, {share:.0%} surface water")
+                   "reference", DEFAULT_SHARE_REASON)
+
+
+def soil_water_inputs(rec, s, grid):
+    """Where the season's soil water started and what was left to refill at harvest.
+    Shown next to the simulated water applied; they explain it, they are not steps."""
+    ss = s.start_soil
+    if ss is None:
+        return
+    if ss.wetness is None:
+        rec.inp("Starting soil water, share of what the root zone holds", 1.0, "fraction",
+                Src("Full root zone assumed: no NASA POWER GWETPROF value on the planting day", ["nasa"],
+                    ["No NASA POWER GWETPROF value for the planting day"]), "model",
+                ss.estimate_reason)
+    else:
+        rec.inp(f"Soil wetness on the planting day, {s.start} (NASA POWER GWETPROF)", ss.wetness,
+                "fraction of pore space", sources.soil_wetness(grid, s.start), "nasa",
+                why_not="NASA POWER daily value for this grid cell")
+        f = reference.soil_water_fractions(ss.soil)
+        for key, name in (("porosity", "Total porosity"), ("theta_fc", "Field capacity"),
+                          ("theta_wp", "Wilting point")):
+            src = sources.soil_property(ss.soil, key)
+            rec.inp(f"{name}, {ss.soil}", f[key], "m3/m3", src, "reference",
+                    None if src.verified else "Typical value for the soil texture, still to be checked",
+                    "Published soil value")
+        rec.inp("Starting soil water, share of what the root zone holds", rnd(ss.fraction, 4), "fraction",
+                sources.simulation([f"GWETPROF x porosity = {ss.theta:.4f} m3/m3",
+                                    "clamp((theta - wilting point) / (field capacity - wilting point), 0, 1)"]),
+                "model", "Model estimate from NASA POWER soil wetness and typical soil values")
+    rec.inp("Soil water deficit at the end of the season, refilled", rnd(s.balance.end_refill, 4), "mm",
+            sources.simulation(["FAO-56 soil water balance on the last day of the season"]), "model",
+            "Model estimate: counted as irrigation so water applied does not depend on the last refill date")
 
 
 def water_price_input(rec, ctx):
@@ -605,6 +639,7 @@ def block_year_records(bt, response, wx):
             net = model_input(rec, "Net irrigation applied to the root zone", rnd(s.applied_net_mm, 4), "mm",
                               fao + (", limited by the farm water cap" if s.capped else ""),
                               sources.net_irrigation(b.crop, grid, start, end, req.optional.soil, s.capped))
+            soil_water_inputs(rec, s, grid)
             ft = const(rec, "Millimeters per foot", 304.8, "mm/ft", sources.MM_PER_FT)
             acres = acres_input(rec, b, req.blocks)
             eff = rec.inp(f"Irrigation efficiency, {b.irrigation.replace('_', ' ')}", irr["efficiency"], "fraction",
@@ -873,6 +908,7 @@ def full_cost_steps(rec, b, s, bt, season, tons):
     water = model_input(rec, "Water applied (to 0.0001 acre-ft)", m["water"], "acre-ft",
                         "Model estimate: simulated irrigation water applied this season",
                         sources.simulation([net.text, eff.text], net.verified and eff.verified))
+    soil_water_inputs(rec, s, grid)
     share = req.optional.surface_water_share
     sh = share_input(rec, req)
     water_parts, labels = [], []

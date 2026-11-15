@@ -38,15 +38,21 @@ def costs(blocks, years, wx, ctx=MERCED, mode="current"):
 
 # ---------------------------------------------------------------- 2. weather
 
-@pytest.mark.xfail(strict=True, reason=(
-    "Model limitation, not a cost bug: each season starts with a full root zone (winter rain and "
-    "pre-plant water are not counted) and the soil deficit left at harvest is not charged. On the real "
-    "Merced weather, April-August 2014 had more reference ET (1,078 vs 1,031 mm) and less rain "
-    "(36 vs 72 mm) than 2017, but 2014 ended with about 64 mm unrefilled versus 5 mm, so the model "
-    "applies 282.0 acre-ft in 2014 and 287.5 in 2017. Flips to passing once the water model charges it."))
 def test_drought_year_costs_more_water_than_wet_year_for_tomatoes_on_drip():
-    c = costs([TOMATOES], (2014, 2017), real_merced_weather())["t"]
-    assert c[2014].water > c[2017].water
+    """Real Merced weather: 2014 (drought) uses more water and costs more than 2017 (wet),
+    same acres and prices. Starting soil water comes from NASA POWER GWETPROF and the
+    deficit left at harvest is refilled, so the last refill date does not decide it."""
+    for share in (1.0, 0.5):
+        req = SimulateRequest.model_validate({"location": LOCATION, "years": [2014, 2017], "blocks": [TOMATOES],
+                                              "optional": {"surface_water_share": share}})
+        bt = engine.run_backtest(req, real_merced_weather())
+        bt.context = engine.LocationContext.model_validate(MERCED).model_dump()
+        engine.apply_money(bt, bt.context)
+        dry, wet = bt.seasons["t"][2014], bt.seasons["t"][2017]
+        assert dry.water_applied_af > wet.water_applied_af
+        assert dry.money["cost"].water > wet.money["cost"].water
+        assert dry.cost > wet.cost
+        assert dry.start_soil.wetness is not None and wet.start_soil.wetness > dry.start_soil.wetness
 
 
 def test_real_weather_fixture_has_the_drought_and_the_wet_year():
@@ -260,3 +266,64 @@ def test_optimizer_prices_water_with_the_requested_share():
         assert opt.verify(problem, sol.acres, blocks, resp) == []
     assert all((by_share[1.0][k] != by_share[0.0][k]).all() for k in by_share[1.0])
     assert OptimizeRequest.model_validate(body).surface_water_share == 0.5  # old requests still work
+
+
+# ---------------------------------------------------------------- water model
+
+def test_default_water_split_is_marked_as_an_estimate():
+    req = SimulateRequest.model_validate({"location": LOCATION, "years": [2002, 2003], "blocks": [TOMATOES]})
+    rec = engine.simulate(req, wx=make_weather(), context=MERCED).calculations["block.t.2003.cost"]
+    share = next(i for i in rec["inputs"] if i["name"] == "Surface water share")
+    assert share["value"] == 0.5 and share["is_estimate"]
+    assert share["estimate_reason"] == ("Default 50/50 surface/well split (team assumption); "
+                                        "choose your water source on the form")
+    chosen = SimulateRequest.model_validate({"location": LOCATION, "years": [2002, 2003], "blocks": [TOMATOES],
+                                             "optional": {"surface_water_share": 0.5}})
+    rec = engine.simulate(chosen, wx=make_weather(), context=MERCED).calculations["block.t.2003.cost"]
+    share = next(i for i in rec["inputs"] if i["name"] == "Surface water share")
+    assert not share["is_estimate"] and share["kind"] == "farmer"
+
+
+def test_starting_soil_water_comes_from_gwetprof():
+    from backend import reference
+    f = reference.soil_water_fractions("loam")
+    s = engine.starting_soil_water(0.49, "loam")  # Merced, 1 April 2015
+    theta = 0.49 * f["porosity"]
+    assert s.theta == pytest.approx(theta)
+    assert s.fraction == pytest.approx((theta - f["theta_wp"]) / (f["theta_fc"] - f["theta_wp"]))
+    assert 0 < s.fraction < 1 and s.estimate_reason is None
+    assert engine.starting_soil_water(0.95, "loam").fraction == 1.0   # wetter than field capacity
+    assert engine.starting_soil_water(0.05, "loam").fraction == 0.0   # drier than wilting point
+    missing = engine.starting_soil_water(None, "loam")
+    assert missing.fraction == 1.0 and "assumed full" in missing.estimate_reason
+
+
+def test_gwetprof_is_cited_and_a_missing_value_is_flagged():
+    req = SimulateRequest.model_validate({"location": LOCATION, "years": [2014, 2015], "blocks": [TOMATOES]})
+    real = engine.simulate(req, wx=real_merced_weather(), context=MERCED).calculations
+    rec = real["block.t.2015.water_applied_af"]
+    wet = next(i for i in rec["inputs"] if "(NASA POWER GWETPROF)" in i["name"])
+    assert wet["value"] == 0.49 and wet["source"].startswith("NASA POWER GWETPROF")
+    assert wet["source_url"] == "https://power.larc.nasa.gov" and not wet["is_estimate"]
+    start = next(i for i in rec["inputs"] if i["name"].startswith("Starting soil water"))
+    assert 0 < start["value"] < 1
+    assert any(i["name"].startswith("Soil wetness on the planting day") for i in real["block.t.2015.cost"]["inputs"])
+    # The synthetic test weather has no GWETPROF: full root zone, flagged.
+    synth = engine.simulate(req.model_copy(update={"years": (2002, 2003)}), wx=make_weather(), context=MERCED)
+    start = next(i for i in synth.calculations["block.t.2003.water_applied_af"]["inputs"]
+                 if i["name"].startswith("Starting soil water"))
+    assert start["value"] == 1.0 and start["is_estimate"] and "assumed full" in start["estimate_reason"]
+
+
+def test_water_applied_is_a_season_water_balance_not_the_last_refill_date():
+    """With the deficit at harvest refilled, net irrigation = crop ET - stored rain + the
+    deficit at planting, whatever day the last in-season refill fell on."""
+    req = SimulateRequest.model_validate({"location": LOCATION, "years": [2014, 2017],
+                                          "blocks": [TOMATOES, ALMONDS, OATS]})
+    bt = engine.run_backtest(req, real_merced_weather())
+    for by_year in bt.seasons.values():
+        for s in by_year.values():
+            b = s.balance
+            start_deficit = s.taw_mm * (1 - s.start_soil.fraction)
+            assert b.depletion[-1] == pytest.approx(0, abs=1e-9)
+            assert s.applied_net_mm == pytest.approx(b.eta.sum() - b.rain_eff.sum() + start_deficit, abs=1e-6)

@@ -266,6 +266,23 @@ def water_price(ctx):
 
 # ---------------------------------------------------------------- defaults
 
+def soil_wetness(grid, day):
+    """NASA POWER GWETPROF on the planting day."""
+    return Src(f"NASA POWER GWETPROF (profile soil wetness, fraction of pore space filled), daily, grid cell "
+               f"{grid[0]:g}, {grid[1]:g}, {day}", ["nasa"], [f"NASA POWER GWETPROF, {day}"])
+
+
+def soil_property(texture, key):
+    entry = defaults_soils()[texture][key]
+    return Src(entry["source"], ["fao56"] if "FAO-56" in entry["source"] else [], [entry["source"]],
+               not entry.get("verify"))
+
+
+def defaults_soils():
+    from backend.reference import soils
+    return soils()
+
+
 def surface_share_default(share):
     return Src(f"Default assumption: {pct(share)} of water from surface water, the rest pumped from wells. "
                "Not measured. Replace with your own value.", ["dwr_ag"], ["Default assumption"])
@@ -341,8 +358,9 @@ def net_irrigation(crop, grid, start, end, texture, capped):
     holds, soil_ok = soil(texture)
     _, kc_ok = crop_field(crop, "kc")
     text = (f"Crop water use minus effective rain (both calculated from NASA POWER weather, grid cell {grid[0]:g}, "
-            f"{grid[1]:g}, {start} to {end}), refilling the root zone whenever it dries past half of what the soil "
-            f"holds (FAO-56 soil water balance, chapter 8; {holds}).")
+            f"{grid[1]:g}, {start} to {end}), starting from the soil water on the planting day (NASA POWER "
+            f"GWETPROF), refilling the root zone whenever it dries past half of what the soil holds, and refilling "
+            f"the deficit left at the end of the season (FAO-56 soil water balance, chapter 8; {holds}).")
     if capped:
         text += " Limited by the farm water cap you entered."
     return Src(text, ["nasa", "fao56"],
