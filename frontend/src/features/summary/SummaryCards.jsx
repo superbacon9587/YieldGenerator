@@ -1,14 +1,14 @@
 import {
   Droplets,
   PiggyBank,
-  TrendingUp,
   Wallet,
   CalendarRange,
 } from "lucide-react";
-import { money, number, percent } from "../../domain.js";
+import { money, number } from "../../domain.js";
 import { summaryOf } from "./landBudget.js";
 import { CalcInfo } from "../provenance/CalcPopover.jsx";
 import HarvestCard from "../yield/HarvestCard.jsx";
+import HarvestLossCard from "../yield/HarvestLossCard.jsx";
 import "./summary.css";
 
 function Card({ label, value, detail, icon: Icon, id, display }) {
@@ -27,7 +27,7 @@ function Card({ label, value, detail, icon: Icon, id, display }) {
 
 /**
  * Top row: average harvest per year (Part C), total profit, average profit,
- * average yield, average water, best and worst year.
+ * average harvest lost to heat or water, average water, best and worst year.
  */
 export default function SummaryCards({ result }) {
   const s = summaryOf(result);
@@ -58,13 +58,7 @@ export default function SummaryCards({ result }) {
         }
         icon={Wallet}
       />
-      <Card
-        label="Average relative yield"
-        id="summary.avg_relative_yield"
-        value={percent(s.avg_relative_yield)}
-        detail="Share of an unstressed year, area weighted"
-        icon={TrendingUp}
-      />
+      <HarvestLossCard result={result} />
       <Card
         label="Average water per year"
         id="summary.avg_water_applied_af"

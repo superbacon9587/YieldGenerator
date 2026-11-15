@@ -9,13 +9,13 @@ import {
   Tooltip,
   Legend,
   ReferenceArea,
-  LabelList,
 } from "recharts";
 import { CROPS } from "../../domain.js";
 import { useYieldUnit, YieldUnitToggle } from "./YieldUnitContext.jsx";
 import { formatAxisTick, unitLabel } from "./yieldUnits.js";
-import { blockLabel, hasWeight, labelsFit, weightByBlock } from "./yieldData.js";
-import { formatCell, getChartRows } from "../provenance/chartData.js";
+import { blockLabel, hasWeight, weightByBlock, weightRow } from "./yieldData.js";
+import { detailFor, harvestSentence, lossCause } from "./harvestLoss.js";
+import { getChartRows } from "../provenance/chartData.js";
 import ChartDataTable from "../summary/ChartDataTable.jsx";
 import "./yield.css";
 
@@ -28,8 +28,39 @@ const tooltipStyle = {
 };
 
 /**
- * Yield tab: harvest weight as bars, one bar per year, with the year's percent
- * of full potential printed on top. Reads result.yield_weight.
+ * Hover box: one plain sentence per crop in the bar, in real weight units, for
+ * example "2021: 0.950 tons/acre. That's 0.050 tons/acre less than a full
+ * harvest, lost to heat."
+ */
+function HarvestTooltip({ active, label: year, result, blockIds, blocks, unit, perAcre }) {
+  if (!active || year == null) return null;
+  const weights = weightByBlock(result);
+  const lines = blockIds.map((id) => {
+    const row = weightRow(weights.get(id), year);
+    const block = blocks.find((b) => b.id === id);
+    return harvestSentence({
+      year,
+      name: blockIds.length > 1 ? blockLabel(block, blocks) : null,
+      tons: perAcre ? row?.tons_per_acre : row?.tons,
+      relativeYield: row?.relative_yield,
+      unit,
+      perAcre,
+      cause: lossCause(detailFor(result, id, year)),
+    });
+  });
+  return (
+    <div className="harvest-tooltip" style={tooltipStyle}>
+      {blockIds.length > 1 && <strong>{year}</strong>}
+      {lines.map((text, i) => (
+        <p key={blockIds[i]}>{text}</p>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Yield tab: harvest weight as bars, one bar per year. Hovering a bar explains
+ * the harvest and any loss to heat or water in real units. Reads result.yield_weight.
  */
 export default function YieldWeightChart({ result, mock }) {
   const { unit } = useYieldUnit();
@@ -52,13 +83,12 @@ export default function YieldWeightChart({ result, mock }) {
   const data = getChartRows(result, { chart: "yield", scope, perAcre, unit });
   const rows = data.rows;
   const years = result.years ?? [];
-  const showLabels = labelsFit(years.length, 1);
   const label = unitLabel(unit, perAcre);
   const selectedBlock = blocks.find((b) => b.id === selected);
   const selectedEmpty = selected !== ALL && !hasWeight(weights.get(selected));
   const noneWithWeight = !data.series.length;
   const top = data.series.at(-1)?.key;
-  const fmt = (v) => formatCell("harvest", v, { perAcre, unit });
+  const shownIds = data.series.map((sr) => sr.blockId ?? selected);
 
   return (
     <div className="yield-weight">
@@ -168,9 +198,15 @@ export default function YieldWeightChart({ result, mock }) {
                 ))}
               <Tooltip
                 cursor={{ fill: "#244d3b0d" }}
-                contentStyle={tooltipStyle}
-                separator=": "
-                formatter={(value, name) => [`${fmt(value)} ${label}`, name]}
+                content={
+                  <HarvestTooltip
+                    result={result}
+                    blockIds={shownIds}
+                    blocks={blocks}
+                    unit={unit}
+                    perAcre={perAcre}
+                  />
+                }
               />
               {data.series.length > 1 && (
                 <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 16 }} />
@@ -185,26 +221,15 @@ export default function YieldWeightChart({ result, mock }) {
                   radius={sr.key === top ? [3, 3, 0, 0] : 0}
                   maxBarSize={44}
                   isAnimationActive={false}
-                >
-                  {showLabels && sr.key === top && (
-                    <LabelList
-                      dataKey="yield"
-                      position="top"
-                      offset={5}
-                      formatter={(v) => formatCell("yield", v)}
-                      style={{ fontSize: 9, fontWeight: 700, fill: "#344f35" }}
-                    />
-                  )}
-                </Bar>
+                />
               ))}
             </BarChart>
           </ResponsiveContainer>
         </div>
       )}
       <p className="caption">
-        Bar height is harvest weight. The percent on top is how close the crop
-        came to its full potential that year.
-        {!showLabels && " The percent for every year is in the table below."}
+        Bar height is harvest weight. Hover a bar to see how much harvest was
+        lost to heat or not enough water that year.
       </p>
       {selected === ALL && missing.length > 0 && (
         <p className="caption">
