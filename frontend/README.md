@@ -74,3 +74,9 @@ Keep both windows open. Select Live backend, run the default Merced farm, and ch
 ## What-if comparisons
 
 Use What if things were different on Results to edit a crop entry's crop, acreage, irrigation, or annual growing months, then click Compare scenario. The quick water-limit and all-drip comparisons remain available. Each scenario uses the same historical years and leaves the original farm unchanged. There is no separate System comparisons section.
+
+## Calculation explanations
+
+Click the information button beside a summary or crop-year metric. The side panel shows actual annual inputs and formulas, the selected price year (which can differ from the weather year), source records, and a NASA query for the exact season/grid. Select a crop and year to inspect harvest, sales/cost/margin, water, rain, crop ET, heat, or GDD. Whole-period view lists annual totals and the sum/divisor for the selected average. The Download export includes the calculation payload.
+
+Costs are regional reference estimates plus modeled water, not actual farm expenses. The budget field is a spending limit. The results banner reconciles sales minus cost and names missing-financial-data crops. Revenue now uses the same median-normalized harvest quantity as displayed harvest, so financial estimates can change. Data citation is not model validation; provisional coefficients and conflicting cost-study metadata are disclosed. Older backend/demo responses without audit inputs get an explicit unavailable explanation.

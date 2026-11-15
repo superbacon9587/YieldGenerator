@@ -24,7 +24,9 @@ export default function LandBudgetPanel({ farm, setFarm, eyebrow }) {
       </div>
       <p className="subtle">
         Total land you farm, and what you can spend to run it each year. The
-        budget is optional here.
+        budget is optional here. It is a spending limit, not your actual
+        expenses. Cost estimates use regional production studies plus modeled
+        water costs, even if you leave this blank.
       </p>
       <div className="form-grid two">
         <label>

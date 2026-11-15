@@ -273,6 +273,7 @@ class SimulateResponse(BaseModel):
     summary: SummaryOut
     waste_flags: list[WasteFlagOut]
     comparisons: list[ComparisonOut] = Field(default_factory=list)
+    calculation_details: dict | None = None
     assumptions: list[str]
     summary_stats: SummaryStatsOut | None = None
     budget: BudgetOut | None = None
