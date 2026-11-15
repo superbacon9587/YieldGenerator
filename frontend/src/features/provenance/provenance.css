@@ -283,3 +283,7 @@
  .calc-inputs tr { display:table-row; }
  .calc-inputs td:last-child { grid-column:auto; }
 }
+
+.calc-inputs thead th:nth-child(1) { width:48%; }
+.calc-inputs thead th:nth-child(2) { width:32%; }
+.calc-inputs thead th:nth-child(3) { width:20%; }

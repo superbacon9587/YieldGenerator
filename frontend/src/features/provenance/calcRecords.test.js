@@ -116,3 +116,12 @@ test("compact references keep source year separate from season and preserve assu
   assert.equal(inputReference({name:"Water, 2021",kind:"model"}).year,"2021");
   assert.equal(inputReference({source:"FAO-56 table 12"}).year,"—");
 });
+
+test("calculation steps show process and answer without substituted input values", async () => {
+ const {compactStep,formulaEquation}=await import("./calcRecords.js");
+ assert.equal(compactStep({text:"Sales: 100 x 2.6 = $260",result:260},0,2),"Sales = $260");
+ assert.equal(compactStep({text:"Sum of 2 yearly values: 10 + 20 = 30 tons",result:30},0,2),"Sum yearly values = 30 tons");
+ assert.equal(compactStep({text:"30 / 2 years = 15 tons",result:15},1,2),"Divide by years with data = 15 tons");
+ assert.equal(compactStep({text:"Cost: 3.5 x 3 = 10.5, rounded to 11",result:11},0,1),"Cost = 11");
+ assert.equal(formulaEquation({id:"block.a.2021.revenue",label:"Sales, Almonds, 2021",formula_text:"Harvest x price"}),"Sales(year) = Harvest x price");
+});

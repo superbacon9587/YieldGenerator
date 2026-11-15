@@ -188,3 +188,20 @@ export function inputReference(input) {
   return {links, year: input.source_year ?? input.year ?? (years.length ? years.join(", ") : "—"),
     basis: assumption ? "Assumption" : /farmer input/i.test(text) ? "Farmer input" : input.kind === "constant" ? "Conversion / count" : input.kind === "model" ? "Calculated" : "Reference"};
 }
+
+/** Keep the process and result; substituted arithmetic remains in Download. */
+export function compactStep(step, index, count) {
+  const left = step.text.split(" = ")[0];
+  let process = /^Sum of /i.test(left) ? "Sum yearly values" :
+    left.includes(":") ? left.split(":")[0] :
+    /\/ [\d,.]+ years/i.test(left) ? "Divide by years with data" :
+    /lb\/ton|mm per|cents per/i.test(left) ? "Convert units" :
+    index === count - 1 ? "Apply formula" : "Calculate intermediate result";
+  const result = step.text.includes(", rounded to ") ? step.text.split(", rounded to ").at(-1) : step.text.split(" = ").at(-1);
+  return `${process} = ${result}`;
+}
+export function formulaEquation(record) {
+  const label = record.label.split(",")[0].replace(/^Estimated /i, "");
+  const seasonal = /\.(?:19|20)\d{2}\./.test(record.id);
+  return `${label}${seasonal ? "(year)" : ""} = ${record.formula_text}`;
+}

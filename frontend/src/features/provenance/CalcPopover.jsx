@@ -7,6 +7,9 @@ import {
   inWeightUnit,
   isEstimated,
   sourceParts,
+  inputReference,
+  compactStep,
+  formulaEquation,
 } from "./calcRecords.js";
 import "./provenance.css";
 
@@ -63,7 +66,19 @@ function Popover({ record, display, close }) {
           </button>
         </div>
       </header>
-      <p className="calc-formula">{record.formula_text}</p>
+      <p className="calc-formula">{formulaEquation(record)}</p>
+      <p className="calc-rounding">The equation uses the table inputs from the original source references: NASA POWER API data, stored USDA/EIA records and UC Davis study extracts, plus farmer inputs and model assumptions.</p>
+      <div className="calc-table-scroll"><table className="calc-inputs">
+        <thead><tr><th>Input</th><th>Value</th><th>Year</th></tr></thead>
+        <tbody>{record.inputs.map((input,index) => <tr key={index}>
+          <th scope="row">{input.name}{inputReference(input).basis === "Assumption" && <small>Assumption</small>}</th>
+          <td>{typeof input.value === "number" ? input.value.toLocaleString("en-US",{maximumFractionDigits:6}) : String(input.value ?? "Not available")} {input.unit}</td>
+          <td>{inputReference(input).year}</td>
+        </tr>)}</tbody>
+      </table></div>
+      <details className="calc-working"><summary>Calculation steps</summary>
+        <ol className="calc-steps">{record.steps.map((step,index) => <li key={index}>{compactStep(step,index,record.steps.length)}</li>)}</ol>
+      </details>
       <details className="calc-working">
         <summary>Reference links</summary>
         <span className="calc-links">
