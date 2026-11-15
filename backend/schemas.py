@@ -275,6 +275,7 @@ class SimulateResponse(BaseModel):
     waste_flags: list[WasteFlagOut]
     comparisons: list[ComparisonOut] = Field(default_factory=list)
     calculation_details: dict | None = None
+    financial_coverage: dict | None = None
     assumptions: list[str]
     summary_stats: SummaryStatsOut | None = None
     budget: BudgetOut | None = None
@@ -347,7 +348,8 @@ class CompareResultOut(BaseModel):
     name: str
     summary_stats: SummaryStatsOut
     budget: BudgetOut
-    rank: int = Field(description="1 is first by ranked_by; ties share a rank; missing values rank last")
+    rank: int | None = Field(description="1 is first; ties share a rank; missing or incomplete financial values are not ranked")
+    financial_coverage: dict | None = None
 
 
 class CompareResponse(BaseModel):

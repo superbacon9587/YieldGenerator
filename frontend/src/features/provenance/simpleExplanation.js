@@ -39,6 +39,14 @@ const unique = (items) =>
   [...new Map(items.filter((x) => x?.url).map((x) => [x.url, x])).values()].map(
     ({ label, url }) => ({ label, url }),
   );
+export function financialScope(result, kind = "margin") {
+  const field = {margin:"profit", revenue:"revenue", cost:"cost"}[kind];
+  const known = result.financial_coverage?.[kind];
+  if (known) return {...known, count: known.included_block_ids.length};
+  const blocks = result.blocks ?? [];
+  const ids = blocks.filter(b => b.yearly?.length && b.yearly.every(y => y[field] != null)).map(b => b.id);
+  return {complete: ids.length === blocks.length, count: ids.length, total_blocks: blocks.length, included_block_ids: ids};
+}
 export function simpleExplanation(result, target, unit = "tons") {
   const data = result.calculation_details;
   const block = data?.blocks.find((b) => b.id === target.blockId);
@@ -104,7 +112,7 @@ export function simpleExplanation(result, target, unit = "tons") {
         base,
         {
           label: "Our model",
-          text: `The denominator is the uncapped-water median over ${result.years[0]}–${result.years.at(-1)} for this crop and calendar. It stays fixed when water is limited.`,
+          text: `The denominator is the uncapped-water median over ${(row.reference_period ?? [result.years[0], result.years.at(-1)]).join("–")} for this crop and calendar. Changing the displayed backtest years or water limit does not recalibrate this reference.`,
         },
       ];
       output.note =
@@ -232,7 +240,7 @@ export function simpleExplanation(result, target, unit = "tons") {
     } else if (metric === "ranking")
       output.formula = `Highest included yearly margin: ${result.summary.best_year}; lowest: ${result.summary.worst_year}. ${result.assumptions.find((s) => s.includes("years are ranked by")) ?? "Ranking method not provided."}`;
     else
-      output.formula = `${cash(rec.avg_revenue)} average sales − ${cash(rec.avg_cost)} average operating cost ≈ ${cash(rec.avg_profit)} average margin/year`;
+      output.formula = `${cash("matched_avg_revenue" in rec ? rec.matched_avg_revenue : rec.avg_revenue)} matched average sales − ${cash("matched_avg_cost" in rec ? rec.matched_avg_cost : rec.avg_cost)} matched average operating cost ≈ ${cash(rec.avg_profit)} average margin/year`;
     output.origins = [
       {
         label: "NASA POWER",
@@ -257,9 +265,9 @@ export function simpleExplanation(result, target, unit = "tons") {
         ),
       data.model_source,
     ]);
-    output.note = data.excluded_financial_blocks.length
-      ? `Financial totals exclude ${data.excluded_financial_blocks.map((b) => CROPS[b.crop]?.name ?? b.crop).join(", ")} because financial inputs are missing. Harvest and water totals can include those crops.`
-      : "These are modeled estimates, not your farm's recorded expenses or income.";
+    const scope = financialScope(result, metric === "avg_revenue" ? "revenue" : metric === "avg_cost" ? "cost" : "margin");
+    output.note = `${scope.count} of ${scope.total_blocks} crop entries included. ${scope.complete ? "These are modeled estimates, not recorded farm income or expenses." : "Whole-farm margin is unavailable. Sales and costs may cover different crops; margin subtracts only matching crops."}`;
+
   }
   return output;
 }

@@ -72,6 +72,8 @@ backend/yield_weight.py; summary_stats.avg_yield_tons is added by backend/summar
 from __future__ import annotations
 
 import calendar
+import hashlib
+from collections import OrderedDict
 import csv
 import datetime as dt
 import json
@@ -431,11 +433,22 @@ def count_heat_days(params: dict, block: BlockIn, start: dt.date, tmax: np.ndarr
     return int(np.sum(active & (tmax > params["heat_stress_c"])))
 
 
+REFERENCE_PERIOD = (1991, 2020)
+_REFERENCE_CACHE = OrderedDict()
+
+
+def reference_years(block: BlockIn, wx: pd.DataFrame) -> list[int]:
+    available = [y for y in range(wx.index.min().year, wx.index.max().year + 1)
+                 if _season_days(block, y, wx) is not None]
+    fixed = [y for y in available if REFERENCE_PERIOD[0] <= y <= REFERENCE_PERIOD[1]]
+    return fixed or available
+
+
 def normal_heat_days(block: BlockIn, wx: pd.DataFrame) -> float:
-    """Median heat stress days for this block over every season the record covers."""
+    """Median heat days over the fixed calibration seasons."""
     params = reference.crop_params(block.crop)
     counts = []
-    for year in range(wx.index.min().year, wx.index.max().year + 1):
+    for year in reference_years(block, wx):
         found = _season_days(block, year, wx)
         if found:
             start, _, days = found
@@ -486,6 +499,23 @@ def simulate_block_season(block: BlockIn, year: int, wx: pd.DataFrame, soil: str
         relative_yield=ry, heat_stress_days=heat_days, gdd=gdd, capped=capped)
 
 
+def fixed_reference_yield(block, wx, soil, normal_heat, weather_key):
+    years = reference_years(block, wx)
+    key = (weather_key, block.crop, block.start_month, block.end_month, soil,
+           reference.soil_awc_mm_per_m(soil), normal_heat, tuple(years),
+           json.dumps(reference.crop_params(block.crop), sort_keys=True))
+    if key not in _REFERENCE_CACHE:
+        # Uncapped yield does not depend on acreage or irrigation efficiency.
+        sample = block.model_copy(update={"acres": 1.0})
+        values = [round(simulate_block_season(sample, y, wx, soil, normal_heat=normal_heat).relative_yield, 3)
+                  for y in years]
+        _REFERENCE_CACHE[key] = median(values) if values else 0.0
+        if len(_REFERENCE_CACHE) > 512:
+            _REFERENCE_CACHE.popitem(last=False)
+    _REFERENCE_CACHE.move_to_end(key)
+    return _REFERENCE_CACHE[key]
+
+
 # ---------------------------------------------------------------- whole farm
 
 @dataclass
@@ -499,6 +529,7 @@ class Backtest:
     water_cost_per_af: dict[int, float | None] = field(default_factory=dict)
     money_notes: list[str] = field(default_factory=list)
     reference_relative_yields: dict[str, float] = field(default_factory=dict)
+    reference_years_used: dict[str, list[int]] = field(default_factory=dict)
 
 
 def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
@@ -509,14 +540,13 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
     years = list(range(request.years[0], request.years[1] + 1))
     seasons: dict[str, dict[int, BlockSeason]] = {b.id: {} for b in request.blocks}
     any_capped = False
-    free_relative = {b.id: [] for b in request.blocks}
     normals = {b.id: normal_heat_days(b, wx) for b in request.blocks}
+    weather_key = hashlib.sha256(pd.util.hash_pandas_object(wx[WEATHER_COLUMNS], index=True).values.tobytes()).hexdigest()
+    references = {b.id: fixed_reference_yield(b, wx, soil, normals[b.id], weather_key) for b in request.blocks}
 
     for year in years:
         free = {b.id: simulate_block_season(b, year, wx, soil, normal_heat=normals[b.id])
                 for b in request.blocks}
-        for b in request.blocks:
-            free_relative[b.id].append(round(free[b.id].relative_yield, 3))
         total_gross = sum(s.gross_need_af for s in free.values())
         if cap is not None and total_gross > cap:
             for b in request.blocks:
@@ -541,7 +571,7 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
             + ", ".join(unverified) + ".")
     grid = (float(wx.attrs.get("lat", request.location.lat)),
             float(wx.attrs.get("lon", request.location.lon)))
-    return Backtest(request, years, grid, seasons, assumptions, reference_relative_yields={key: median(values) for key, values in free_relative.items()})
+    return Backtest(request, years, grid, seasons, assumptions, reference_relative_yields=references, reference_years_used={b.id: reference_years(b, wx) for b in request.blocks})
 
 
 # ---------------------------------------------------------------- money
@@ -614,16 +644,16 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
                 missing["crop price"] = None
             if bt.water_cost_per_af[y] is None:
                 missing["water price"] = None
-            if price is None or base is None or prod is None or bt.water_cost_per_af[y] is None or not typical:
-                s.revenue = s.cost = None
-                continue
-            per_acre = economics.convert_quantity(base["value"], base["unit"], price.unit, b.crop)
-            s.revenue = round(s.relative_yield, 3) / typical * per_acre * b.acres * price.value
-            s.cost = (prod["cost_excl_water"] * b.acres
-                      + s.water_applied_af * bt.water_cost_per_af[y])
+            if price is not None and base is not None and typical:
+                per_acre = economics.convert_quantity(base["value"], base["unit"], price.unit, b.crop)
+                s.revenue = round(s.relative_yield, 3) / typical * per_acre * b.acres * price.value
+            else:
+                s.revenue = None
+            s.cost = (prod["cost_excl_water"] * b.acres + s.water_applied_af * bt.water_cost_per_af[y]
+                      if prod is not None and bt.water_cost_per_af[y] is not None else None)
         if missing:
             notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
-                  "cost, and profit are shown as no data."] = None
+                  "cost, or margin may be unavailable; sales and costs are calculated independently where inputs exist."] = None
 
     notes["Revenue and harvest use the same uncapped-reference calibration; water-limited scenarios do not recalibrate away their yield losses."] = None
     if mode == "current":
@@ -700,15 +730,17 @@ def build_response(bt: Backtest) -> SimulateResponse:
             year=y,
             water_applied_af=round(sum(s.water_applied_af for s in ss), 1),
             relative_yield=round(sum(s.relative_yield * s.acres for s in ss) / total_acres, 3),
-            revenue=_sum_or_none([s.revenue for s in with_money]),
-            cost=_sum_or_none([s.cost for s in with_money]),
+            revenue=_sum_or_none([s.revenue for s in ss]),
+            cost=_sum_or_none([s.cost for s in ss]),
             profit=_sum_or_none([s.profit for s in with_money]),
         ))
     summary, metric = summarize(bt.years, farm)
+    if metric == "farm profit":
+        metric = "known-crop operating margin" if left_out else "farm operating margin"
 
     assumptions = list(bt.assumptions) + list(ctx.get("data_quality", [])) + bt.money_notes
     if left_out:
-        assumptions.append("Farm dollar totals only add up blocks with price data (left out: "
+        assumptions.append("Known-crop margin totals exclude entries with incomplete financial inputs (left out: "
                            + ", ".join(left_out) + ").")
     assumptions.append(f"The summary's high, low, and typical years are ranked by {metric}.")
 

@@ -40,11 +40,13 @@ def compare(req: CompareRequest) -> CompareResponse:
     # Ranking only needs the summary, so skip the per-block system comparisons.
     responses = [sim.simulate(c.farm, include_comparisons=False) for c in req.configs]
     values = [getattr(r.summary_stats, req.ranked_by) for r in responses]
+    if req.ranked_by in {"avg_profit", "total_profit"}:
+        values = [v if r.financial_coverage["margin"]["complete"] else None for v,r in zip(values,responses)]
     ranks = rank(values, req.ranked_by in LOWER_IS_FIRST)
     results = [
         CompareResultOut(name=c.name.strip(), summary_stats=r.summary_stats,
-                         budget=r.budget, rank=k)
-        for c, r, k in zip(req.configs, responses, ranks)
+                         budget=r.budget, rank=k if v is not None else None, financial_coverage=r.financial_coverage)
+        for c, r, k, v in zip(req.configs, responses, ranks, values)
     ]
-    order = sorted(range(len(results)), key=lambda i: (results[i].rank, i))
+    order = sorted(range(len(results)), key=lambda i: (results[i].rank is None, results[i].rank or 0, i))
     return CompareResponse(results=[results[i] for i in order], ranked_by=req.ranked_by)

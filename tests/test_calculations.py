@@ -29,7 +29,7 @@ def test_harvest_sales_cost_and_margin_share_the_same_quantity(mode):
             assert abs(r["displayed"]["revenue"]-r["revenue_unrounded"]) <= .5
             assert r["production_cost_excl_water"] == 3000*40
     rec = details["reconciliation"]
-    assert rec["avg_revenue"]-rec["avg_cost"] == pytest.approx(rec["avg_profit"], abs=1)
+    assert rec["matched_avg_revenue"]-rec["matched_avg_cost"] == pytest.approx(rec["avg_profit"], abs=1)
     assert rec["avg_profit"] == pytest.approx(mean(r.profit for r in out.farm_totals))
 
 
@@ -89,3 +89,24 @@ def test_verified_pdf_categories_reconcile_to_extracted_nonwater_cost():
         assert sum(study['nonwater_categories_per_acre'].values()) == study['nonwater_cost_per_acre']
         assert study['operating_cost_per_acre']-study['water_cost_per_acre'] == study['nonwater_cost_per_acre']
         assert len(study['sha256']) == 64
+
+
+def test_same_season_stays_stable_when_display_period_changes():
+    wx, ctx = make_weather(), make_context()
+    req = request()
+    short = req.model_copy(update={"years": [2002, 2004]})
+    a = engine.simulate(req, wx=wx, context=ctx, include_comparisons=False)
+    b = engine.simulate(short, wx=wx, context=ctx, include_comparisons=False)
+    for x,y in zip(a.blocks,b.blocks):
+        assert next(row for row in x.yearly if row.year == 2003) == next(row for row in y.yearly if row.year == 2003)
+    assert a.yield_weight[0].reference_relative_yield == b.yield_weight[0].reference_relative_yield
+
+
+def test_sales_and_cost_coverage_are_independent():
+    out = engine.simulate(request(), wx=make_weather(), context=make_context())
+    assert out.financial_coverage["revenue"]["complete"]
+    assert not out.financial_coverage["margin"]["complete"]
+    for total, almond, oats in zip(out.farm_totals, out.blocks[0].yearly, out.blocks[1].yearly):
+        assert total.revenue == pytest.approx(almond.revenue + oats.revenue, abs=1)
+        assert oats.revenue > 0 and oats.cost is None and oats.profit is None
+        assert total.profit == almond.profit

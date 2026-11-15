@@ -55,8 +55,8 @@ export function setupAcres(farm) {
 }
 
 export const RANK_OPTIONS = {
-  avg_profit: "Average profit per year",
-  total_profit: "Total profit",
+  avg_profit: "Average operating margin per year",
+  total_profit: "Total operating margin",
   avg_relative_yield: "Average relative yield",
   avg_water_applied_af: "Average water per year",
 };

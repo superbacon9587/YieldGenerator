@@ -90,3 +90,13 @@ test("missing trace reports unavailable and does not invent zero harvest", () =>
     /unavailable/,
   );
 });
+
+test("partial margin uses matching sales and costs, not all known sales", () => {
+  const r = structuredClone(result);
+  r.financial_coverage = {margin:{complete:false,included_block_ids:["a"],total_blocks:2}};
+  Object.assign(r.calculation_details.reconciliation, {avg_revenue:1000, matched_avg_revenue:30, matched_avg_cost:15});
+  const e = simpleExplanation(r, {metric:"avg_profit"});
+  assert.match(e.formula, /\$30/);
+  assert.doesNotMatch(e.formula, /1,000/);
+  assert.match(e.note, /Whole-farm margin is unavailable/);
+});

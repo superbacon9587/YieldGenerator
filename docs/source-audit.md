@@ -49,3 +49,11 @@ Several coefficients remain explicitly marked verify=true in crops.json, irrigat
 ## Verification
 
 Tests cover harvest and revenue consistency, water-limit monotonicity with a fixed reference, expense sums and unit conversions, source years/season URLs, missing data and PDF-category reconciliation. The UI gives a one-line calculation for the selected metric and distinguishes weather inputs, repo references and model outputs. Full precision remains downloadable. Actual predictive accuracy still requires independent observed yield data and held-out-year validation.
+
+## Financial coverage and calibration correction
+
+Sales and operating costs are now calculated independently. Oats can have known sales while its regional operating cost and margin remain unavailable. Farm sales and costs sum their own available entries. Operating margin sums only entries with both, and the API exposes `financial_coverage` and matching sales/cost totals so different scopes are never subtracted in the explanation.
+
+The model uses complete seasons from 1991–2020 for the uncapped reference and normal heat days, independently of the displayed backtest period. When that interval is absent, it uses the complete supplied weather record; calculation details report the actual reference years. This is a calibration choice, not empirical validation of yield predictions. Changing displayed years with the same weather record no longer changes an existing season's estimate.
+
+Prices labeled “Latest stored prices” are the latest available CSV references, not live market quotations. Each crop-year explanation identifies its price reference year. Costs remain regional operating-cost estimates; overhead and establishment are excluded.

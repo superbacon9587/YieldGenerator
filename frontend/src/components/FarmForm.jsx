@@ -423,7 +423,7 @@ export default function FarmForm({
                 aria-pressed={farm.price_mode === "current"}
                 onClick={() => setFarm({ ...farm, price_mode: "current" })}
               >
-                Today's prices
+                Latest stored prices
               </button>
               <button
                 type="button"

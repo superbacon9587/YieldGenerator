@@ -17,8 +17,8 @@ import {
 import "./compare.css";
 
 const COLUMNS = [
-  ["total_profit", "Total profit", money, false],
-  ["avg_profit", "Average profit", money, false],
+  ["total_profit", "Total operating margin", money, false],
+  ["avg_profit", "Average operating margin", money, false],
   ["avg_relative_yield", "Average relative yield", percent, false],
   ["avg_water_applied_af", "Average water", (v) => (v == null ? "Not available" : `${number(v, 1)} acre-ft`), true],
 ];
@@ -59,7 +59,7 @@ function RankingTable({ data }) {
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.name}>
-              <td className="compare-rank">{r.rank}</td>
+              <td className="compare-rank">{r.rank ?? "Not ranked"}{r.financial_coverage?.margin?.complete === false && <small>Incomplete crop costs</small>}</td>
               <th>{r.name}</th>
               {COLUMNS.map(([key, , format]) => {
                 const v = r.summary_stats?.[key];

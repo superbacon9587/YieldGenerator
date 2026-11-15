@@ -121,6 +121,8 @@ def land(request: SimulateRequest) -> tuple[LandOut, list[str]]:
 
 def add_to_response(response: SimulateResponse, request: SimulateRequest,
                     context: dict) -> SimulateResponse:
+    from backend.financial_coverage import describe
+    response.financial_coverage = describe(response)
     stats, n1 = summary_stats(response)
     bud, n2 = budget(response, request.optional.budget_usd)
     lnd, n3 = land(request)

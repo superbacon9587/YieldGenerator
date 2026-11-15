@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { Info, X } from "lucide-react";
 import { CROPS, money } from "../../domain.js";
 import { useYieldUnit } from "../yield/YieldUnitContext.jsx";
-import { METRIC_TITLES, simpleExplanation } from "./simpleExplanation.js";
+import { METRIC_TITLES, simpleExplanation, financialScope } from "./simpleExplanation.js";
 import "./provenance.css";
 const Context = createContext(null);
 export function MetricInfo({ metric = "summary", blockId, year, label }) {
@@ -114,21 +114,21 @@ export function CalculationProvider({ result, children }) {
 export function MoneyExplanation({ result }) {
   const d = result.calculation_details;
   if (!d) return null;
+  const scope = financialScope(result);
   return (
     <div className="money-explanation" role="note">
       <strong>
-        Estimated sales {money(d.reconciliation.avg_revenue)}
-        <MetricInfo metric="avg_revenue" /> − operating cost{" "}
-        {money(d.reconciliation.avg_cost)}
-        <MetricInfo metric="avg_cost" /> = operating margin{" "}
-        {money(d.reconciliation.avg_profit)} per year
-        <MetricInfo metric="avg_profit" />
+        Known sales {money(d.reconciliation.avg_revenue)}<MetricInfo metric="avg_revenue" />
+        {" · "}Known operating cost {money(d.reconciliation.avg_cost)}<MetricInfo metric="avg_cost" />
+        {" · "}{scope.complete ? "Operating margin" : `Margin for ${scope.count} of ${scope.total_blocks} crops`}{" "}
+        {money(d.reconciliation.avg_profit)} per year<MetricInfo metric="avg_profit" />
       </strong>
+      {!scope.complete && <p>Whole-farm margin unavailable. Sales include crops whose costs may be missing; the margin includes only crops with both sales and costs.</p>}
       <p>
         Costs use regional study references, not your actual expenses. Overhead
         and establishment are excluded.{" "}
         {d.excluded_financial_blocks.length
-          ? `${d.excluded_financial_blocks.map((b) => CROPS[b.crop]?.name ?? b.crop).join(", ")} excluded from financial totals because inputs are missing.`
+          ? `${d.excluded_financial_blocks.map((b) => CROPS[b.crop]?.name ?? b.crop).join(", ")} excluded from margin because financial inputs are missing.`
           : ""}
       </p>
     </div>

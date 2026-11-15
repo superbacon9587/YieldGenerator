@@ -84,6 +84,7 @@ def build(bt, response, wx):
                 "displayed": row.model_dump(), "harvest_tons_per_acre": harvest_tpa,
                 "harvest_tons": harvest_tpa*b.acres if harvest_tpa is not None else None,
                 "baseline_yield": base, "baseline_tons_per_acre": base_tons, "median_relative_yield": typical,
+                "reference_period": [bt.reference_years_used[b.id][0], bt.reference_years_used[b.id][-1]],
                 "crop_price": vars(price) if price else None, "electricity_price": vars(electricity) if electricity else None,
                 "pounds_per_sale_unit": economics.unit_to_lb(price.unit, b.crop) if price else None,
                 "sale_quantity": economics.convert_quantity(harvest_tpa*b.acres, "TON", price.unit, b.crop) if harvest_tpa is not None and price else None,
@@ -109,6 +110,11 @@ def build(bt, response, wx):
         blocks.append({"id": b.id, "crop": b.crop, "acres": b.acres, "sources": sources, "yearly": yearly})
     totals = response.farm_totals
     financial = [r for r in totals if r.profit is not None]
+    matched = response.financial_coverage['matched_totals']
+    def avg(items, field):
+        values=[(getattr(r,field) if hasattr(r,field) else r.get(field)) for r in items]
+        values=[v for v in values if v is not None]
+        return mean(values) if values else None
     excluded = [{"block_id": b.id, "crop": b.crop, "years": [r.year for r in b.yearly if r.profit is None]} for b in response.blocks if any(r.profit is None for r in b.yearly)]
     return {"version": 1, "model_revision": revision(), "data_revision": revision(), "price_mode": req.price_mode,
         "cost_basis": "Regional study operating costs plus modeled water; cash/non-cash overhead and establishment are not included. No farmer operating expenses were supplied. The budget is a spending limit, not an expense input.",
@@ -116,7 +122,8 @@ def build(bt, response, wx):
         "validation_status": "Model estimates; source tracing does not establish predictive accuracy. Crop coefficients marked verify=true and pump/water assumptions still require review.",
         "rounding_note": "Calculations use unrounded internal values; crop dollar rows and farm totals are rounded to whole dollars. Displayed rounded inputs may differ slightly when multiplied.",
         "excluded_financial_blocks": excluded,
-        "reconciliation": {"avg_revenue": mean(r.revenue for r in financial) if financial else None, "avg_cost": mean(r.cost for r in financial) if financial else None, "avg_profit": mean(r.profit for r in financial) if financial else None, "years": [r.year for r in financial]},
+        "financial_coverage": response.financial_coverage,
+        "reconciliation": {"avg_revenue": avg(totals,"revenue"), "avg_cost": avg(totals,"cost"), "avg_profit": avg(totals,"profit"), "matched_avg_revenue": avg(matched,"revenue"), "matched_avg_cost": avg(matched,"cost"), "years": [r.year for r in financial]},
         "annual_totals": [r.model_dump() for r in totals], "blocks": blocks,
         "model_source": source("Exact model implementation", "backend/simulate.py"),
         "harvest_source": source("Harvest conversion and median scaling", "backend/yield_weight.py"),

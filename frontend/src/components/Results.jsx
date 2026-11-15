@@ -85,8 +85,8 @@ function Comparison({ base, result }) {
   const rows = [
     ["Applied water / year", "water", (v) => `${number(v, 1)} acre-ft`, false],
     ["Area-weighted relative yield", "yield", percent, true],
-    ["Profit / year", "profit", money, true],
-    ["Lowest yearly profit", "worstProfit", money, true],
+    ["Operating margin / year", "profit", money, true],
+    ["Lowest yearly margin", "worstProfit", money, true],
   ];
   return (
     <div className="comparison-table">
@@ -284,7 +284,7 @@ export default function Results({ farm, result, mock, onBack }) {
                     : key === "water"
                       ? "Water"
                       : key === "profit"
-                        ? "Profit"
+                        ? "Margin"
                         : "Production"}
                 </button>
               ))}
@@ -370,7 +370,7 @@ export default function Results({ farm, result, mock, onBack }) {
                       ) : (
                         <Bar
                           dataKey="profit"
-                          name="Farm profit"
+                          name={result.financial_coverage?.margin?.complete === false ? "Known-crop operating margin" : "Farm operating margin"}
                           radius={[3, 3, 0, 0]}
                           isAnimationActive={false}
                         >
@@ -396,7 +396,7 @@ export default function Results({ farm, result, mock, onBack }) {
             <p className="caption">
               {overBudget.size > 0 &&
                 "Amber outline: farm cost was above your budget that year. "}
-              Missing profit remains unavailable, not zero. Farm financial
+              Missing margin remains unavailable, not zero. Farm financial
               totals may include only crops with price and cost data; check the
               assumptions.
             </p>
@@ -454,7 +454,7 @@ export default function Results({ farm, result, mock, onBack }) {
                     <br />
                     (°C-days)
                   </th>
-                  <th>Profit</th>
+                  <th>Operating margin</th>
                 </tr>
               </thead>
               <tbody>
@@ -544,6 +544,7 @@ export default function Results({ farm, result, mock, onBack }) {
                       </td>
                       <td>
                         {money(r?.profit)}
+                        {r?.profit == null && r?.revenue != null && <small>Sales {money(r.revenue)}; cost unavailable</small>}
                         <MetricInfo
                           metric="profit"
                           blockId={b.id}

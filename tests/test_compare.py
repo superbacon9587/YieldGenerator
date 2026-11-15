@@ -43,7 +43,7 @@ def test_compare_ranks_by_profit_by_default(client):
     assert names == ["Drip corn", "Flood corn"]  # drip pays less for water
     assert [x["rank"] for x in data["results"]] == [1, 2]
     for x in data["results"]:
-        assert set(x) == {"name", "summary_stats", "budget", "rank"}
+        assert set(x) == {"name", "summary_stats", "budget", "rank", "financial_coverage"}
         assert x["summary_stats"]["years_count"] == 4
 
 
@@ -113,3 +113,12 @@ def test_meta_drops_presets_longer_than_history(client, monkeypatch):
     import datetime as dt
     monkeypatch.setattr(power_client, "default_end_date", lambda today=None: dt.date(2010, 12, 31))
     assert client.get("/api/meta").json()["presets"] == [5, 10, 20]
+
+
+def test_partial_financial_setups_are_not_ranked_as_whole_farm(client, monkeypatch):
+    from conftest import make_context
+    monkeypatch.setattr(sim, "get_location_context", lambda lat,lon: make_context())
+    partial = request([block("b1",crop="oats", start=11,end=4)]).model_dump()
+    result = client.post("/api/compare",json={"configs":[{"name":"Known","farm":farm()},{"name":"Missing oats cost","farm":partial}]}).json()
+    assert result["results"][-1]["rank"] is None
+    assert not result["results"][-1]["financial_coverage"]["margin"]["complete"]

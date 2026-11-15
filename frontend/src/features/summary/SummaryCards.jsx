@@ -8,6 +8,7 @@ import {
 import { money, number, percent } from "../../domain.js";
 import { summaryOf } from "./landBudget.js";
 import { MetricInfo } from "../provenance/CalculationDetails.jsx";
+import { financialScope } from "../provenance/simpleExplanation.js";
 import HarvestCard from "../yield/HarvestCard.jsx";
 import "./summary.css";
 
@@ -45,6 +46,8 @@ function Card({ label, value, detail, icon: Icon }) {
 export default function SummaryCards({ result }) {
   const s = summaryOf(result);
   const years = s.years_count;
+  const scope = financialScope(result);
+  const coverage = `${scope.count} of ${scope.total_blocks} crops; whole-farm margin unavailable`;
   return (
     <div className="metrics-grid summary-grid">
       <HarvestCard
@@ -52,16 +55,16 @@ export default function SummaryCards({ result }) {
         relativeYield={s.avg_relative_yield}
       />
       <Card
-        label="Total operating margin"
+        label={scope.complete ? "Total operating margin" : "Total known-crop margin"}
         value={money(s.total_profit)}
-        detail={`Over ${years} years`}
+        detail={scope.complete ? `Over ${years} years` : coverage}
         icon={PiggyBank}
       />
       <Card
-        label="Operating margin per year"
+        label={scope.complete ? "Operating margin per year" : "Known-crop margin per year"}
         value={money(s.avg_profit)}
         detail={
-          s.avg_cost == null
+          !scope.complete ? coverage : s.avg_cost == null
             ? "Cost not available"
             : `Estimated cost ${money(s.avg_cost)}/year`
         }

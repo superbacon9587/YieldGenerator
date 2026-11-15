@@ -35,7 +35,7 @@ def test_simulate_endpoint(client, monkeypatch):
     data = r.json()
     assert set(data) == {"location", "years", "blocks", "farm_totals", "summary",
                          "waste_flags", "assumptions", "comparisons",
-                         "summary_stats", "budget", "land", "yield_weight", "calculation_details"}
+                         "summary_stats", "budget", "land", "yield_weight", "calculation_details", "financial_coverage"}
     # 3 blocks x 3 other irrigation types, plus corn and oats planting windows
     # (each window list from crops.json minus the current start month).
     kinds = [row["kind"] for row in data["comparisons"]]
@@ -45,7 +45,7 @@ def test_simulate_endpoint(client, monkeypatch):
     assert data["location"]["cost_region"] == "San Joaquin Valley North"
     assert data["years"] == [2001, 2002, 2003, 2004]
     oats = next(b for b in data["blocks"] if b["id"] == "b2")
-    assert all(y["profit"] is None and y["revenue"] is None for y in oats["yearly"])
+    assert all(y["profit"] is None and y["revenue"] is not None for y in oats["yearly"])
     corn = next(b for b in data["blocks"] if b["id"] == "b3")
     assert all(y["profit"] is not None for y in corn["yearly"])
     assert any("statewide median" in a for a in data["assumptions"])

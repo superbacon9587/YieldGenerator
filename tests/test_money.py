@@ -61,7 +61,7 @@ def test_missing_cost_gives_null_money_but_keeps_water(weather):
                                        start=11, end=4)]), weather, make_context())
     oats = resp.blocks[1]
     for y in oats.yearly:
-        assert y.revenue is None and y.cost is None and y.profit is None
+        assert y.revenue is not None and y.cost is None and y.profit is None
         assert y.relative_yield > 0 and y.crop_water_use_in > 0
     assert any("b2 (oats) has no production cost" in a for a in resp.assumptions)
     # Farm totals add up the blocks that have money and say which were left out.
@@ -69,7 +69,7 @@ def test_missing_cost_gives_null_money_but_keeps_water(weather):
     for t, a in zip(resp.farm_totals, almonds):
         assert t.profit == pytest.approx(a.profit, abs=1)
     assert any("left out: b2 (oats)" in a for a in resp.assumptions)
-    assert any("ranked by farm profit" in a for a in resp.assumptions)
+    assert any("ranked by known-crop operating margin" in a for a in resp.assumptions)
 
 
 def test_missing_baseline_yield_gives_null_money(weather):

@@ -17,7 +17,7 @@ Scaling against a typical year:
 
         tons_per_acre = baseline_tons_per_acre x relative_yield / median relative_yield
 
-    where public backtests use the median from the uncapped-water reference run over the selected years, held fixed when a water cap is applied. Standalone helpers without a reference retain their legacy median behavior. A typical
+    where public backtests use the median from the uncapped-water reference run over the fixed 1991–2020 complete-season reference (or available record when absent), independent of display years and water caps. Standalone helpers without a reference retain their legacy median behavior. A typical
     year shows the typical county harvest, a drought year shows less, and a good
     year shows a bit more. When the median is 0 or missing, or the crop has no
     baseline yield, the weights are null.
