@@ -134,3 +134,17 @@ test("yearly row equations appear once and steps omit substituted arithmetic", a
  assert.equal(compactStep({text:"Sum of 2 yearly sales values: 10 + 20 = $30"},0,5),"Sum yearly sales values = $30");
  assert.equal(compactStep({text:"Average sales: $30 / 2 years = $15"},1,5),"Average sales = $15");
 });
+
+test("financial info pairs existing yearly revenue and costs with matching scope", async () => {
+ const {financialRows}=await import("./calcRecords.js");
+ const revenue={name:"Sales, 2021",value:100,unit:"$"};
+ const cost={name:"Cost, 2021",value:40,unit:"$"};
+ const records={"table.farm.total.sales":{inputs:[revenue]},"table.farm.total.cost":{inputs:[cost]}};
+ const rows=financialRows({id:"summary.avg_profit"},records);
+ assert.equal(rows[0].revenue,revenue);
+ assert.equal(rows[0].cost,cost);
+ assert.equal(financialRows({id:"summary.avg_yield_tons"},records),null);
+ const missing=financialRows({id:"summary.avg_revenue"},{"table.farm.total.sales":records["table.farm.total.sales"]});
+ assert.equal(missing[0].cost,null);
+ assert.equal(revenue.value,100);
+});

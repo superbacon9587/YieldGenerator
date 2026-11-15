@@ -231,3 +231,26 @@ export function formatInputValue(input) {
   }
   return `${value}${unit ? ` ${unit}` : ""}`;
 }
+
+/** Pair existing annual revenue and cost records without recalculating either. */
+export function financialRows(record, records) {
+  const table=record.id.match(/^table\.(.+)\.(total|per_acre)\.(sales|cost|margin|margin_pct)$/);
+  const block=record.id.match(/^block\.(.+)\.((?:19|20)\d{2})\.(profit|revenue|cost)$/);
+  const summary=/^summary\.(avg_revenue|avg_cost|avg_profit|total_profit|worst_profit)$/.test(record.id);
+  if(!table && !block && !summary) return null;
+  const scope=table?.[1] ?? block?.[1] ?? "farm";
+  const basis=table?.[2] ?? "total";
+  const sales=records[`table.${scope}.${basis}.sales`];
+  const costs=records[`table.${scope}.${basis}.cost`];
+  const byYear=new Map();
+  for(const [column,source] of [["revenue",sales],["cost",costs]]) for(const input of source?.inputs ?? []) {
+    const match=input.name.match(/, ((?:19|20)\d{2})$/);
+    if(!match) continue;
+    const year=Number(match[1]);
+    if(block && year!==Number(block[2])) continue;
+    const row=byYear.get(year) ?? {year,revenue:null,cost:null};
+    row[column]=input;
+    byYear.set(year,row);
+  }
+  return byYear.size ? [...byYear.values()].sort((a,b)=>a.year-b.year) : null;
+}

@@ -12,6 +12,7 @@ import {
   formulaEquation,
   tableEquations,
   formatInputValue,
+  financialRows,
 } from "./calcRecords.js";
 import "./provenance.css";
 
@@ -36,6 +37,8 @@ function Popover({ record, display, close }) {
     };
   }, []);
   const estimated = isEstimated(record);
+  const records = useContext(Records);
+  const moneyRows = financialRows(record, records);
   return (
     <dialog
       ref={dialog}
@@ -76,6 +79,14 @@ function Popover({ record, display, close }) {
         {tableEquations(record).map(equation => <p className="calc-formula" key={equation}>{equation}</p>)}
         <p className="calc-formula">{formulaEquation(record)}</p>
       </div>
+      {moneyRows ? <div className="calc-table-scroll"><table className="calc-inputs">
+        <thead><tr><th>Year</th><th>Revenue</th><th>Cost</th></tr></thead>
+        <tbody>{moneyRows.map(row => <tr key={row.year}>
+          <th scope="row">{row.year}</th>
+          <td>{row.revenue ? formatInputValue(row.revenue) : "Not available"}</td>
+          <td>{row.cost ? formatInputValue(row.cost) : "Not available"}</td>
+        </tr>)}</tbody>
+      </table></div> : <>
       <div className="calc-table-scroll"><table className="calc-inputs">
         <thead><tr><th>Input</th><th>Value</th><th>Year</th></tr></thead>
         <tbody>{record.inputs.map((input,index) => <tr key={index}>
@@ -84,6 +95,7 @@ function Popover({ record, display, close }) {
           <td>{inputReference(input).year}</td>
         </tr>)}</tbody>
       </table></div>
+      </>}
       <details className="calc-working">
         <summary>Reference links</summary>
         <span className="calc-links">
