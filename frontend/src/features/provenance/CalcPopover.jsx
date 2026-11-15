@@ -6,6 +6,7 @@ import {
   formatRecordValue,
   inWeightUnit,
   isEstimated,
+  sourceParts,
 } from "./calcRecords.js";
 import "./provenance.css";
 
@@ -22,6 +23,27 @@ const inputValue = (v) =>
   typeof v === "number"
     ? v.toLocaleString("en-US", { maximumFractionDigits: 6 })
     : String(v ?? "Not available");
+
+/** Where an input's data came from: text, "From:" line for estimates, publisher links. */
+function InputSource({ input }) {
+  const { text, from, links, verified } = sourceParts(input);
+  return (
+    <>
+      <span>{text}</span>
+      {!verified && <span className="calc-unverified">Source not yet verified</span>}
+      {input.is_estimate && from && <small className="calc-from">{from}</small>}
+      {links.length > 0 && (
+        <span className="calc-links">
+          {links.map((l) => (
+            <a key={l.url} href={l.url} target="_blank" rel="noreferrer">
+              {l.label}
+            </a>
+          ))}
+        </span>
+      )}
+    </>
+  );
+}
 
 function Popover({ record, display, close }) {
   const dialog = useRef(null);
@@ -97,13 +119,7 @@ function Popover({ record, display, close }) {
               <td>{inputValue(i.value)}</td>
               <td>{i.unit}</td>
               <td>
-                {i.source_url ? (
-                  <a href={i.source_url} target="_blank" rel="noreferrer">
-                    {i.source}
-                  </a>
-                ) : (
-                  i.source
-                )}
+                <InputSource input={i} />
               </td>
             </tr>
           ))}

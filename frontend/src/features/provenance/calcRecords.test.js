@@ -1,10 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   differenceRecord,
   formatRecordValue,
   inWeightUnit,
   isEstimated,
+  sourceParts,
 } from "./calcRecords.js";
 
 const harvest = {
@@ -49,6 +51,57 @@ test("a difference record subtracts the two rounded record values", () => {
   assert.equal(d.inputs.length, 2);
   assert.ok(d.inputs.every((i) => i.source));
   assert.equal(differenceRecord(null, a, "x"), null);
+});
+
+const sample = JSON.parse(readFileSync(new URL("./sample_response.json", import.meta.url)));
+const CODE_WORDS = /\.py\b|backend\/|function|YieldGenerator model/i;
+
+function checkSources(where, record) {
+  for (const i of record.inputs) {
+    const at = `${where} / ${i.name}`;
+    assert.ok(String(i.source).trim(), at);
+    assert.equal(CODE_WORDS.test(i.source), false, `${at}: ${i.source}`);
+    for (const link of i.links ?? []) {
+      assert.ok(link.url.startsWith("https://"), `${at}: ${link.url}`);
+      assert.equal(link.url.includes("github.com"), false, `${at}: ${link.url}`);
+    }
+    if (i.is_estimate) {
+      assert.ok(i.derived_from?.length, `${at}: derived_from`);
+      assert.ok(sourceParts(i).links.length, `${at}: publisher link`);
+      assert.ok(sourceParts(i).from.startsWith("From: "), at);
+    }
+  }
+}
+
+test("every input in every record has a farmer-readable source with publisher links", () => {
+  const records = Object.values(sample.calculations);
+  assert.ok(records.length > 50);
+  for (const r of records) {
+    checkSources(r.id, r);
+    if (r.lb) checkSources(`${r.id} (lb)`, r.lb);
+    checkSources(`${r.id} (shown in lb)`, inWeightUnit(r, "lb"));
+  }
+  const c = sample.calculations;
+  const diff = differenceRecord(c["summary.avg_cost"], c["summary.avg_cost"], "Difference, cost");
+  checkSources(diff.id, diff);
+  assert.ok(diff.inputs[0].source.includes('"Estimated cost per year" box'));
+});
+
+test("source cell parts: From line, unverified flag, no code links", () => {
+  const parts = sourceParts({
+    source: "Default assumption: 60% pump efficiency",
+    links: [
+      { label: "Pump tests", url: "https://jcast.fresnostate.edu/pumpefficiency/pumptesting" },
+      { label: "Code", url: "https://github.com/x/y/blob/main/backend/economics.py" },
+    ],
+    derived_from: ["Default assumption"],
+    source_verified: false,
+    is_estimate: true,
+  });
+  assert.equal(parts.from, "From: Default assumption");
+  assert.equal(parts.verified, false);
+  assert.deepEqual(parts.links.map((l) => l.label), ["Pump tests"]);
+  assert.equal(sourceParts({ source: "Farmer input" }).verified, true);
 });
 
 test("no record text uses em dashes", () => {

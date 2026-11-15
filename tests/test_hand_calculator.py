@@ -9,7 +9,7 @@ from backend import regions, simulate as engine
 from backend.schemas import SimulateRequest
 from conftest import make_weather
 from hand_calculator import calculate, hand_check
-from test_wording import ADVICE
+from test_wording import advice_in
 
 REPORTED = {"farmer", "nasa", "nass"}
 
@@ -63,7 +63,7 @@ def test_every_input_has_value_unit_and_source(merced):
         texts = [rec["label"], rec["formula_text"], rec["rounding"]] + [s["text"] for s in rec["steps"]] + [
             str(i[k]) for i in rec["inputs"] for k in ("name", "source", "estimate_reason", "not_estimate_reason")]
         assert not any("—" in t or "–" in t for t in texts), rid
-        assert not [t for t in texts if ADVICE.search(t)], rid
+        assert not advice_in(texts), rid
 
 
 def test_required_breakdowns_are_spelled_out(merced):

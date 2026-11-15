@@ -5,11 +5,12 @@ For every record in /api/simulate, /api/compare and /api/optimize responses:
   * the last step's result equals the record value,
   * the value equals the number the response (and so the UI) shows,
   * every input names a source, and every input that is not farmer, NASA or NASS data
-    is tagged as an estimate with a reason or says why it is not an estimate.
+    is tagged as an estimate with a reason or says why it is not an estimate,
+  * sources are written for a farmer: no code files, publisher https links (never
+    github.com), and every estimate lists what it was derived from.
 """
 
 import re
-from pathlib import Path
 
 import pytest
 
@@ -17,7 +18,7 @@ from backend import calculations, compare, optimize as opt, regions, simulate as
 from backend.schemas import CompareRequest, OptimizeRequest, SimulateRequest
 from conftest import make_context, make_weather
 from hand_calculator import hand_check
-from test_wording import ADVICE
+from test_wording import advice_in
 
 WX = make_weather()
 REPORTED = {"farmer", "nasa", "nass"}
@@ -51,25 +52,39 @@ def simulated(request):
     return req, engine.simulate(req, wx=WX, context=ctx)
 
 
-ROOT = Path(__file__).resolve().parent.parent
-REPO_PREFIX = f"{calculations.REPO_URL}/blob/{calculations.BRANCH}/"
-HASH = re.compile(r"\b[0-9a-f]{40}\b")
+CODE_WORDS = re.compile(r"\.py\b|backend/|function|YieldGenerator model", re.IGNORECASE)
 
 
-def assert_repo_link(url, where):
-    """Repo links point at an existing file on BRANCH, never at a commit hash."""
-    if not url or not url.startswith(calculations.REPO_URL):
-        return
-    assert not HASH.search(url), (where, url)
-    assert url.startswith(REPO_PREFIX), (where, url)
-    path = url.removeprefix(REPO_PREFIX).split("#")[0]
-    assert (ROOT / path).is_file(), (where, url)
+def assert_link(url, where):
+    """Every link is a publisher's https page, never the code repository."""
+    assert url.startswith("https://"), (where, url)
+    assert "github.com" not in url, (where, url)
+
+
+def check_sources(rid, rec):
+    """Farmer-readable sources: no code files, publisher links, derived_from on estimates."""
+    for i in rec["inputs"]:
+        where = (rid, i["name"])
+        assert str(i["source"]).strip(), where
+        assert not CODE_WORDS.search(i["source"]), (where, i["source"])
+        assert not any(CODE_WORDS.search(d) for d in i["derived_from"]), (where, i["derived_from"])
+        assert isinstance(i["source_verified"], bool), where
+        for link in i["links"]:
+            assert_link(link["url"], where)
+            assert link["label"].strip(), where
+        if i["source_url"] is not None:
+            assert_link(i["source_url"], where)
+            assert i["source_url"] == i["links"][0]["url"], where
+        if i["is_estimate"]:
+            assert i["derived_from"] and all(d.strip() for d in i["derived_from"]), where
+            assert i["links"], where
 
 
 def check_record(rid, rec):
     assert rec["id"] == rid.removesuffix(" (lb)")
-    for i in rec["inputs"]:
-        assert_repo_link(i["source_url"], (rid, i["name"]))
+    check_sources(rid, rec)
+    if "lb" in rec:
+        check_sources(rid + " (lb)", rec["lb"])
     hand_check(rid, rec)
     if "lb" in rec:
         hand_check(rid + " (lb)", rec["lb"])
@@ -81,7 +96,8 @@ def check_record(rid, rec):
             assert i["not_estimate_reason"], (rid, i)
     texts = [rec["label"], rec["formula_text"], rec["rounding"]] + [s["text"] for s in rec["steps"]]
     assert not any("\u2014" in t or "\u2013" in t for t in texts), rid
-    assert not [t for t in texts if ADVICE.search(t)], rid
+    assert not advice_in(texts + [i["source"] for i in rec["inputs"]]), rid
+    assert not any("—" in i["source"] or "–" in i["source"] for i in rec["inputs"]), rid
 
 
 def test_every_record_reevaluates_to_its_value(simulated):
@@ -128,23 +144,70 @@ def test_values_match_the_numbers_the_response_shows(simulated):
                     assert c[f"{key}.{field}"]["lb"]["value"] == round(getattr(w, field) * 2000)
 
 
-def test_source_links_point_at_existing_files_on_main(simulated):
+def test_audit_sources_link_to_publishers_not_code(simulated):
     _, out = simulated
     d = out.calculation_details
-    links = [d["model_source"], d["harvest_source"]]
+    assert "model_source" not in d
+    links = [d["harvest_source"]]
     for b in d["blocks"]:
         links += b["sources"]
         for y in b["yearly"]:
             links += [v for v in y.values() if isinstance(v, dict) and "url" in v]
-    assert any(s["url"].startswith(calculations.REPO_URL) for s in links)
     for s in links:
-        assert_repo_link(s["url"], s["label"])
-    assert d["model_revision"] == calculations.BRANCH
-    assert_repo_link("https://github.com/superbacon9587/YieldGenerator/blob/main/backend/simulate.py", "sanity")
+        assert not CODE_WORDS.search(s["label"]), s["label"]
+        if s["url"] is not None:
+            assert_link(s["url"], s["label"])
     with pytest.raises(AssertionError):
-        assert_repo_link(f"{calculations.REPO_URL}/blob/{'0b816eaf' * 5}/backend/simulate.py", "hash")
+        assert_link("https://github.com/x/y/blob/main/data.csv", "github")
     with pytest.raises(AssertionError):
-        assert_repo_link(f"{REPO_PREFIX}backend/missing.py", "missing")
+        check_sources("x", {"inputs": [{"name": "x", "source": "YieldGenerator model, backend/simulate.py",
+                                         "links": [], "derived_from": [], "source_verified": True,
+                                         "source_url": None, "is_estimate": False}]})
+
+
+def test_sources_name_the_real_data_used():
+    """Grid cell, county, years, table and page come from the run's own data."""
+    req, ctx = CASES["merced_reference"]
+    out = engine.simulate(req, wx=WX, context=ctx)
+    c = out.calculations
+    profit = {i["name"]: i for i in c["block.c.2003.profit"]["inputs"]}
+    base = profit["Corn baseline yield (NASS median)"]
+    assert base["source"].startswith("USDA NASS Quick Stats, Merced County corn grain yield, ")
+    assert re.search(r"\d{4} to \d{4} median \(\d+ years\)", base["source"])
+    assert base["links"][0]["url"] == "https://quickstats.nass.usda.gov"
+    cost = profit["Production cost excluding water"]
+    assert re.match(r"UC Davis Cost and Return Study, Corn, .+, \d{4}, p\. \d+\.", cost["source"])
+    elec = next(i for n, i in profit.items() if n.startswith("Electricity price"))
+    assert elec["source"].startswith("U.S. EIA, California average commercial electricity price, ")
+    assert elec["source_url"] == "https://www.eia.gov/electricity/data/browser"
+    water = profit["Surface water price"]
+    assert water["source"].startswith("Merced Irrigation District 2024 rate")
+    lift = profit["Well lift"]
+    assert lift["source"].startswith("Default assumption: 150 ft well lift. Not measured. Replace with your own value.")
+    etc = next(i for i in c["block.c.2003.crop_water_use_in"]["inputs"] if i["is_estimate"])
+    assert "grid cell 37.5, -120.625" in etc["source"] and "FAO-56 Penman-Monteith" in etc["source"]
+    assert "Table 12, p. 10" in etc["source"]
+    assert {link["url"] for link in etc["links"]} >= {"https://power.larc.nasa.gov",
+                                                     "https://www.fao.org/3/x0490e/x0490e00.htm"}
+    assert "NASA POWER weather" in etc["derived_from"]
+    ry = next(i for i in c["block.c.2003.relative_yield"]["inputs"] if i["is_estimate"])
+    assert "Ky = " in ry["source"] and "FAO-66, Table 1, printed p. 7" in ry["source"]
+
+
+def test_unverified_sources_are_flagged_not_guessed():
+    req, ctx = CASES["merced_reference"]
+    c = engine.simulate(req, wx=WX, context=ctx).calculations
+    profit = {i["name"]: i for i in c["block.a.2003.profit"]["inputs"]}
+    assert not profit["Production cost excluding water"]["source_verified"]  # 2024 study cited from a 2022 file
+    assert not profit["Pump efficiency"]["source_verified"]  # defaults.json has no source for it
+    eff = next(i for i in c["block.a.2003.water_applied_af"]["inputs"] if i["name"].startswith("Irrigation efficiency"))
+    assert not eff["source_verified"] and "to be checked" in eff["source"]
+    ry = next(i for i in c["block.a.2003.relative_yield"]["inputs"] if i["is_estimate"])
+    assert not ry["source_verified"] and "source not yet verified" in ry["source"]  # almond Ky is a placeholder
+    # Injected test context: the baseline matches no NASS records, so it is not claimed.
+    test_ctx = engine.simulate(farm(), wx=WX, context=make_context()).calculations
+    base = next(i for i in test_ctx["block.a.2003.profit"]["inputs"] if "baseline" in i["name"])
+    assert not base["source_verified"] and base["source"].startswith("Source not yet verified")
 
 
 def test_reported_and_estimated_inputs_are_tagged():
@@ -156,14 +219,15 @@ def test_reported_and_estimated_inputs_are_tagged():
     assert by_name["Well lift"]["estimate_reason"] == "Default assumption, 150 ft well lift"
     assert by_name["Surface water share"]["is_estimate"]  # not entered, schema default
     cost = by_name["Production cost excluding water"]
-    assert cost["is_estimate"] and "UC Davis cost study" in cost["source"]
+    assert cost["is_estimate"] and "UC Davis Cost and Return Study" in cost["source"]
     assert "file name" in cost["estimate_reason"]  # 2024 study cited from a 2022 file
     price = next(i for i in profit["inputs"] if i["name"].startswith("Almonds price"))
     assert price["kind"] == "nass" and "USDA NASS Quick Stats" in price["source"]
     water = out.calculations["block.a.2003.crop_water_use_in"]
     etc = next(i for i in water["inputs"] if i["name"].startswith("Season crop water use"))
-    assert etc["source"].startswith("NASA POWER daily, grid cell 37.5, -120.625")
-    assert etc["source_url"].startswith("https://power.larc.nasa.gov/")
+    assert etc["source"].startswith("Calculated from NASA POWER daily weather")
+    assert "grid cell 37.5, -120.625" in etc["source"]
+    assert etc["source_url"] == "https://power.larc.nasa.gov"
     assert "FAO-56" in etc["estimate_reason"]
     assert profit["is_estimate"]
     entered = engine.simulate(farm(surface_water_share=0.5), wx=WX, context=ctx).calculations

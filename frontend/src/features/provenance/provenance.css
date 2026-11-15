@@ -156,6 +156,29 @@
   color: #2c5c43;
   overflow-wrap: anywhere;
 }
+/* Source cell: text, "From:" line, publisher links, unverified flag. */
+.calc-from {
+  display: block;
+  margin-top: 3px;
+  color: #4b5e4f;
+}
+.calc-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin-top: 3px;
+}
+.calc-unverified {
+  display: inline-block;
+  margin: 3px 0 0;
+  padding: 0 6px;
+  border: 1px solid #e0b252;
+  border-radius: 999px;
+  background: #fdf1d6;
+  color: #7c5212;
+  font-size: 11px;
+  font-weight: 600;
+}
 
 .calc-rounding {
   margin: 10px 0 0;

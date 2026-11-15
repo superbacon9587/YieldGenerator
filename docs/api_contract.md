@@ -533,10 +533,13 @@ Every number the UI shows with an information button has a record, keyed by id. 
   "is_estimate": true,
   "steps": [{"text": "Almonds: 1.16 tons/acre x 40 acres = 46.4 tons", "expr": "1.16*40", "result": 46.4}],
   "inputs": [{"name": "Almonds area", "value": 40, "unit": "acres", "source": "Farmer input",
-              "source_url": null, "kind": "farmer", "is_estimate": false,
+              "source_url": null, "links": [], "derived_from": [], "source_verified": true,
+              "kind": "farmer", "is_estimate": false,
               "estimate_reason": null, "not_estimate_reason": null}]
 }
 ```
+
+Input sources are written for a farmer (backend/sources.py), never a code file. Reported data names the data, its publisher and the part used (for example "USDA NASS Quick Stats, Merced County corn grain yield, 1994 to 2014 median (21 years)"). Estimates say what they were calculated from and by which method. `links` are the publishers' https pages (`source_url` is the first one); `derived_from` names the upstream inputs and data sets of an estimate, shown as "From: ..." under it. `source_verified` is false when the reference file's source field is missing, marked verify=true, or disagrees with itself; the box then shows "Source not yet verified" in amber.
 
 Ids: `summary.<field>` (avg_profit, avg_cost, avg_revenue, total_profit, avg_relative_yield, avg_water_applied_af, avg_yield_tons, best_year, worst_year, worst_profit, years_over_budget), `block.<id>.<year>.<field>` (crop_water_use_in, effective_rain_in, water_applied_af, relative_yield, tons_per_acre, tons, heat_stress_days, gdd, profit), `table.<farm|block id>.<total|per_acre>.<metric>` (Average row of the data table under each chart: harvest, sales, cost, margin, margin_pct, water, yield), optimizer `block.<id>.avg_profit`, `block.<id>.avg_yield_tons`, and `difference.<field>`.
 

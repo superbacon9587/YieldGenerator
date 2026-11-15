@@ -26,8 +26,13 @@ TEXT_MODULES = ["regions.py", "simulate.py", "summary.py", "yield_weight.py", "o
 WX = make_weather()
 
 
+# The one allowed use of "replace": a default input telling the farmer it can be
+# overwritten with their own number. It is about the input, not about the farm.
+INPUT_PROMPT = re.compile(r"Replace with your (own value|district's rate)")
+
+
 def advice_in(texts):
-    return [t for t in texts if ADVICE.search(t)]
+    return [t for t in texts if ADVICE.search(INPUT_PROMPT.sub("", t))]
 
 
 def string_constants(path: Path) -> list[str]:
