@@ -19,8 +19,8 @@ const preciseMoney = (value) =>
       });
 const titles = {
   harvest: "Harvest per acre and total harvest",
-  profit: "Revenue, operating cost, and modeled margin",
-  cost: "Estimated operating cost",
+  profit: "Revenue, estimated cost, and modeled margin",
+  cost: "Estimated production cost",
   revenue: "Estimated sales revenue",
   water: "Water applied",
   relative: "Relative yield",
@@ -121,7 +121,7 @@ function Equations({ metric, row: r, block }) {
         explanation.
       </p>
       <p className="equation">
-        {n(r.sale_quantity)} sale units × {n(r.crop_price?.value)}{" "}
+        {n(r.sale_quantity)} {r.crop_price?.unit.replace(/^\$\s*\/\s*/, "") ?? "sale units"} × {n(r.crop_price?.value)}{" "}
         {r.crop_price?.unit} ={" "}
         <b>{preciseMoney(r.revenue_unrounded)} sales revenue</b>
       </p>

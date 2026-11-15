@@ -61,6 +61,8 @@ def build(bt, response, wx):
             filename_year = re.search(r"(20[0-9]{2})\.pdf", record["source"])
             if filename_year and filename_year.group(1) != record["study_year"]:
                 cost_warnings.append(f"Cost record study_year is {record['study_year']} but its cited filename contains {filename_year.group(1)}. This source metadata has not been reconciled; treat this cost as provisional.")
+        if yield_rows and max(int(record["year"]) for record in yield_rows) > req.years[1]:
+            cost_warnings.append("The baseline yield extract includes reference years after this backtest ends. This is a retrospective scenario using later reference data, not an out-of-sample historical prediction.")
         sources = [source("Baseline yield: exact input extract", path, yield_rows), source("Regional production-cost input extract", "data/reference/prices/production_costs.csv", cost_rows), source("Crop coefficients and their verification flags", "data/reference/crops.json", [reference.get_crop(b.crop)]), source("Water and pump assumptions", "data/reference/prices/defaults.json", [defaults]), source("Irrigation efficiencies", "data/reference/irrigation.json")]
         yearly = []
         for row in out.yearly:

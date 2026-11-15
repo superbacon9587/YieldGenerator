@@ -303,7 +303,7 @@ export default function App() {
               <span>
                 {mock
                   ? "Numbers and drought patterns are synthetic. Use this mode to test the experience while the model is connected."
-                  : "NASA and model provenance depend on the backend response. Review assumptions before interpreting outputs."}
+                  : "Historical weather plus regional yield, price, and cost references. Estimates, not farm accounts. Open the information buttons beside results for exact inputs."}
               </span>
             </div>
             <span className="banner-tag">

@@ -31,7 +31,7 @@ from statistics import median
 from backend import units
 from backend.schemas import BlockOut, BlockYieldWeightOut, YieldWeightYearOut
 
-ASSUMPTION = ("Harvest weight is the county median yield scaled by how each year's relative "
+ASSUMPTION = ("Harvest weight is the selected county or statewide median yield scaled by how each year's relative "
               "yield compares with this block's median year, so a typical year shows a "
               "typical county harvest.")
 

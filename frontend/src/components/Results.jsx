@@ -250,7 +250,7 @@ export default function Results({ farm, result, mock, onBack }) {
         <p className="yield-note">
           <Info size={15} />
           <span>
-            Harvest weight starts from the county's typical (median) NASS yield
+            Harvest weight starts from the selected county or statewide median NASS yield
             and moves up or down with each year's growing conditions. The
             percent of potential compares against a crop with no water or heat
             stress. The Production tab shows each crop entry's total harvest
