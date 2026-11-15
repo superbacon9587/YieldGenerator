@@ -108,3 +108,11 @@ test("no record text uses em dashes", () => {
   const text = JSON.stringify([inWeightUnit(harvest, "lb"), differenceRecord(harvest, harvest, "x")]);
   assert.equal(/[–—]/.test(text), false);
 });
+
+test("compact references keep source year separate from season and preserve assumptions", async () => {
+  const { inputReference } = await import("./calcRecords.js");
+  assert.equal(inputReference({name:"Price for 2021",source_year:2025}).year,2025);
+  assert.equal(inputReference({source:"Default assumption: 60%"}).basis,"Assumption");
+  assert.equal(inputReference({name:"Water, 2021",kind:"model"}).year,"2021");
+  assert.equal(inputReference({source:"FAO-56 table 12"}).year,"—");
+});

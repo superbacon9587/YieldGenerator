@@ -56,7 +56,8 @@ ELECTRICITY_SERIES = "electricity_commercial"
 class Src:
     """One input's source: text, publisher links, upstream inputs, verified flag."""
 
-    def __init__(self, text, links=(), derived_from=(), verified=True):
+    def __init__(self, text, links=(), derived_from=(), verified=True, year=None):
+        self.year = year
         self.text, self.links = text, list(links)
         self.derived_from, self.verified = list(derived_from), verified
 
@@ -68,7 +69,7 @@ class Src:
                 seen.add(url)
                 links.append({"label": label, "url": url})
         return {"source": self.text, "source_url": links[0]["url"] if links else None, "links": links,
-                "derived_from": self.derived_from, "source_verified": self.verified}
+                "derived_from": self.derived_from, "source_verified": self.verified, "source_year": self.year}
 
 
 @cache
@@ -134,7 +135,7 @@ def baseline(crop, ctx):
         years = [int(r["year"]) for r in rows]
         text = (f"USDA NASS Quick Stats, {where} {NASS_NAMES.get(crop, crop)} yield, "
                 f"{span(years)} median ({len(years)} years)")
-        return Src(text, ["nass"], [f"USDA NASS {where} yield, {span(years)}"])
+        return Src(text, ["nass"], [f"USDA NASS {where} yield, {span(years)}"], year=span(years))
     return Src(f"{UNVERIFIED}: no USDA NASS {where} yield records match this baseline", ["nass"],
                ["USDA NASS yield"], verified=False)
 
@@ -158,7 +159,7 @@ def cost(crop, ctx):
     if file_year and file_year.group(1) != row["study_year"]:
         ok = False
         text += f" The study year ({row['study_year']}) and the cited file ({file_year.group(1)}) disagree."
-    return Src(text, ["ucd"], [f"UC Davis cost study, {crop_name(crop)}, {row['region']}, {row['study_year']}"], ok)
+    return Src(text, ["ucd"], [f"UC Davis cost study, {crop_name(crop)}, {row['region']}, {row['study_year']}"], ok, year=int(row["study_year"]))
 
 
 def price(crop, p):
@@ -168,7 +169,7 @@ def price(crop, p):
                    ["USDA NASS price received"], verified=False)
     year_kind = "marketing year" if "MARKETING YEAR" in rows[0]["source"] else "calendar year"
     return Src(f"USDA NASS Quick Stats, California {NASS_NAMES.get(crop, crop)} price received, "
-               f"{p.year} {year_kind}", ["nass"], [f"USDA NASS California price received, {p.year}"])
+               f"{p.year} {year_kind}", ["nass"], [f"USDA NASS California price received, {p.year}"], year=p.year)
 
 
 def electricity(e):
@@ -177,7 +178,7 @@ def electricity(e):
         return Src(f"{UNVERIFIED}: no U.S. EIA electricity record for {e.year}", ["eia"],
                    ["U.S. EIA electricity price"], verified=False)
     return Src(f"U.S. EIA, California average commercial electricity price, {e.year}", ["eia"],
-               [f"U.S. EIA California commercial electricity price, {e.year}"])
+               [f"U.S. EIA California commercial electricity price, {e.year}"], year=e.year)
 
 
 def water_price(ctx):
@@ -198,7 +199,8 @@ def water_price(ctx):
                    verified=False)
     links = urls_in(src) + (["mid"] if "Merced Irrigation District" in src else [])
     district = re.split(r"\s\(|:\s|;\s|,\s", strip_urls(src), maxsplit=1)[0]
-    return Src(strip_urls(src), links or ["dwr_ag"], [district], ok and bool(src))
+    year = re.match(r"Merced Irrigation District (\d{4}) rate", src)
+    return Src(strip_urls(src), links or ["dwr_ag"], [district], ok and bool(src), year=int(year.group(1)) if year else None)
 
 
 # ---------------------------------------------------------------- defaults
@@ -318,7 +320,7 @@ def median_relative_yield(crop, years):
     _, ok = crop_field(crop, "ky")
     return Src(f"Median of the {crop_name(crop).lower()} relative yields over {span(years)}, each calculated from NASA "
                "POWER weather with FAO-56 water use and the FAO-33 yield response factor (Ky).",
-               ["fao66", "nasa"], [f"Relative yield each year, {span(years)}"], ok)
+               ["fao66", "nasa"], [f"Relative yield each year, {span(years)}"], ok, year=span(years))
 
 
 def heat_days(crop, heat_c, grid, start, end):

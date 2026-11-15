@@ -179,3 +179,12 @@ export function differenceRecord(changed, original, label) {
     })),
   };
 }
+
+export function inputReference(input) {
+  const { links } = sourceParts(input);
+  const text = input.source ?? "";
+  const assumption = /^(default assumption|placeholder|team assumption|team estimate)/i.test(text);
+  const years = [...new Set(input.name?.match(/\b(?:19|20)\d{2}\b/g) ?? [])];
+  return {links, year: input.source_year ?? input.year ?? (years.length ? years.join(", ") : "—"),
+    basis: assumption ? "Assumption" : /farmer input/i.test(text) ? "Farmer input" : input.kind === "constant" ? "Conversion / count" : input.kind === "model" ? "Calculated" : "Reference"};
+}

@@ -248,7 +248,11 @@ class Record:
 
     def inp(self, name, value, unit, src, kind="reference", estimate=None, why_not=None, money=False):
         src = src if isinstance(src, Src) else Src(src)
-        self.inputs.append({"name": name, "value": value, "unit": unit, **src.fields(),
+        fields = src.fields()
+        season = re.search(r"\.(\d{4})\.", self.id)
+        if fields.get("source_year") is None and kind in {"model", "nasa"} and season:
+            fields["source_year"] = int(season.group(1))
+        self.inputs.append({"name": name, "value": value, "unit": unit, **fields,
                             "kind": kind, "is_estimate": bool(estimate),
                             "estimate_reason": estimate or None,
                             "not_estimate_reason": None if estimate else why_not})

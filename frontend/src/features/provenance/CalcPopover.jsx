@@ -6,7 +6,7 @@ import {
   formatRecordValue,
   inWeightUnit,
   isEstimated,
-  sourceParts,
+  inputReference,
 } from "./calcRecords.js";
 import "./provenance.css";
 
@@ -24,25 +24,12 @@ const inputValue = (v) =>
     ? v.toLocaleString("en-US", { maximumFractionDigits: 6 })
     : String(v ?? "Not available");
 
-/** Where an input's data came from: text, "From:" line for estimates, publisher links. */
 function InputSource({ input }) {
-  const { text, from, links, verified } = sourceParts(input);
-  return (
-    <>
-      <span>{text}</span>
-      {!verified && <span className="calc-unverified">Source not yet verified</span>}
-      {input.is_estimate && from && <small className="calc-from">{from}</small>}
-      {links.length > 0 && (
-        <span className="calc-links">
-          {links.map((l) => (
-            <a key={l.url} href={l.url} target="_blank" rel="noreferrer">
-              {l.label}
-            </a>
-          ))}
-        </span>
-      )}
-    </>
-  );
+  const { links, basis } = inputReference(input);
+  return <><small className="calc-basis">{basis}</small><span className="calc-links">
+    {links.map(l => <a key={l.url} href={l.url} target="_blank" rel="noreferrer">{l.label}</a>)}
+    {!links.length && <span>—</span>}
+  </span></>;
 }
 
 function Popover({ record, display, close }) {
@@ -90,41 +77,34 @@ function Popover({ record, display, close }) {
         </div>
       </header>
       <p className="calc-formula">{record.formula_text}</p>
-      <ol className="calc-steps">
+      <details className="calc-working"><summary>Calculation steps</summary><ol className="calc-steps">
         {record.steps.map((s, i) => (
           <li key={i}>{s.text}</li>
         ))}
-      </ol>
-      <table className="calc-inputs">
+      </ol></details>
+      <div className="calc-table-scroll"><table className="calc-inputs">
         <thead>
           <tr>
             <th>Input</th>
             <th>Value</th>
-            <th>Unit</th>
-            <th>Source</th>
+            <th>Year</th>
+            <th>Reference</th>
           </tr>
         </thead>
         <tbody>
           {record.inputs.map((i, n) => (
             <tr key={n} className={i.is_estimate ? "calc-estimate" : ""}>
-              <th scope="row">
-                {i.name}
-                {i.is_estimate && (
-                  <>
-                    <span className="calc-tag">Estimate</span>
-                    <small>{i.estimate_reason}</small>
-                  </>
-                )}
-              </th>
-              <td>{inputValue(i.value)}</td>
-              <td>{i.unit}</td>
+              <th scope="row">{i.name}</th>
+              <td>{inputValue(i.value)}{i.unit ? ` ${i.unit}` : ""}</td>
+              <td>{inputReference(i).year}</td>
               <td>
                 <InputSource input={i} />
               </td>
             </tr>
           ))}
         </tbody>
-      </table>
+      </table></div>
+      <p className="calc-rounding">Year identifies the source record or modeled season. — means no year was supplied or applies. Assumptions are defaults, not farm measurements.</p>
       {record.rounding && <p className="calc-rounding">{record.rounding}</p>}
     </dialog>
   );

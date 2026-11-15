@@ -268,3 +268,18 @@
     border-color: #8a6a2a;
   }
 }
+
+.calc-table-scroll { overflow-x:auto; }
+.calc-inputs { min-width:520px; table-layout:auto; }
+.calc-inputs tr.calc-estimate { background:transparent; }
+.calc-inputs thead th:nth-child(1) { width:32%; }
+.calc-inputs thead th:nth-child(2) { width:24%; }
+.calc-inputs thead th:nth-child(3) { width:16%; }
+.calc-basis { display:block; color:#64735f; font-weight:400; }
+.calc-working { margin:8px 0 14px; }
+.calc-working summary { cursor:pointer; color:#315f43; }
+@media(max-width:600px) {
+ .calc-inputs thead { display:table-header-group; }
+ .calc-inputs tr { display:table-row; }
+ .calc-inputs td:last-child { grid-column:auto; }
+}

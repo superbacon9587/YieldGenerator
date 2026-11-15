@@ -295,3 +295,21 @@ def test_steps_show_both_the_exact_and_the_rounded_result():
     assert rec.steps[0]["text"] == "1 / 3 = 0.333333"
     assert rec.steps[1]["text"] == "0.333333 x 3 = 0.999999, rounded to 1.00"
     hand_check("x", rec.out(1.0))
+
+
+def test_source_year_is_not_replaced_by_modeled_season():
+    from backend.sources import Src
+    record = calculations.Record("block.a.2021.cost", "Cost", "$", 0, "", "")
+    record.inp("Electricity", 0.26, "$/kWh", Src("EIA", year=2025))
+    record.inp("Water", 100, "acre-ft", Src("NASA"),kind="model",estimate="Water balance")
+    record.inp("Pump efficiency", 0.6, "fraction", Src("Assumption", verified=False))
+    assert [i["source_year"] for i in record.inputs] == [2025,2021,None]
+    assert record.inputs[-1]["source_verified"] is False
+
+
+def test_reference_year_metadata_matches_the_actual_input():
+    from backend import sources
+    assert sources.median_relative_yield("corn",[2001,2002,2003]).fields()["source_year"] == "2001 to 2003"
+    ctx = regions.build_context({"state":"CA","county":"Merced","in_california":True})
+    assert sources.cost("almonds",ctx).fields()["source_year"] == 2024
+    assert sources.water_price(ctx).fields()["source_year"] == 2024
