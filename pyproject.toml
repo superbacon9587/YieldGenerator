@@ -1,3 +1,15 @@
+[project]
+name = "yieldgenerator"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi", "uvicorn", "requests", "python-dotenv", "pydantic>=2.6",
+  "numpy", "pandas", "pyarrow", "pyet", "scipy>=1.11"
+]
+
+[tool.vercel]
+entrypoint = "deployment.vercel_app:app"
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

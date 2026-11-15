@@ -42,3 +42,6 @@ Thumbs.db
 .vscode/
 .idea/
 data/raw/
+
+# Local hosting account metadata
+.vercel/
