@@ -89,3 +89,29 @@ export function averageLostPerAcre(result) {
   }
   return perYear.length ? perYear.reduce((a, b) => a + b, 0) / perYear.length : null;
 }
+
+/** Explain the new loss card using the existing calculation-info layout. */
+export function harvestLossRecord(result) {
+  const value = averageLostPerAcre(result);
+  if (!finite(value)) return null;
+  const weights = weightByBlock(result);
+  const inputs = [];
+  for (const year of result?.years ?? []) {
+    for (const block of result?.blocks ?? []) {
+      const row = weightRow(weights.get(block.id), year);
+      if (lostTons(row?.tons, row?.relative_yield) == null) continue;
+      const source = { source: "Modeled harvest from USDA NASS baseline yields and NASA POWER weather", source_year: year,
+        links: [{ label: "USDA NASS Quick Stats", url: "https://quickstats.nass.usda.gov/" },
+          { label: "NASA POWER", url: "https://power.larc.nasa.gov/" }] };
+      inputs.push(
+        { ...source, name: `${block.crop} · ${block.id} harvest`, value: row.tons, unit: "tons" },
+        { ...source, name: `${block.crop} · ${block.id} relative yield`, value: row.relative_yield, unit: "fraction" },
+        { name: `${block.crop} · ${block.id} acres`, value: block.acres, unit: "acres", source: "Farmer input", source_year: year },
+      );
+    }
+  }
+  return { id: "summary.avg_harvest_loss", label: "Average modeled harvest lost per acre", value,
+    unit: "tons/acre", decimals: 3, is_estimate: true,
+    formula_text: "mean over years of [sum of crop losses ÷ supported crop acres]; crop loss = max(0, harvest × (1 ÷ relative yield − 1))",
+    steps: [{ text: `Average yearly modeled loss per supported acre: apply formula = ${value.toFixed(3)} tons/acre`, result: value, expr: String(value) }], inputs };
+}

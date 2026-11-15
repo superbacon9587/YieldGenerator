@@ -6,6 +6,7 @@ import {
   harvestSentence,
   lossCause,
   lostTons,
+  harvestLossRecord,
 } from "./harvestLoss.js";
 
 const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) < eps, `${a} vs ${b}`);
@@ -71,4 +72,21 @@ test("detail lookup tolerates a missing calculation_details", () => {
   assert.equal(detailFor({}, "a", 2001), null);
   const r = { calculation_details: { blocks: [{ id: "a", yearly: [{ year: 2001, ky: 1 }] }] } };
   assert.deepEqual(detailFor(r, "a", 2001), { year: 2001, ky: 1 });
+});
+
+test("loss info table reproduces the card from harvest, relative yield and acres", () => {
+  const result = { years: [2020, 2021], blocks: [{ id: "a", crop: "corn", acres: 10 }],
+    yield_weight: [{ block_id: "a", yearly: [
+      { year: 2020, tons: 8, relative_yield: 0.8 },
+      { year: 2021, tons: 9, relative_yield: 0.9 },
+    ] }] };
+  const record = harvestLossRecord(result);
+  const yearly = result.years.map(year => {
+    const [harvest, relative, acres] = record.inputs.filter(i => i.source_year === year).map(i => i.value);
+    return (harvest / relative - harvest) / acres;
+  });
+  near(record.value, yearly.reduce((a, b) => a + b) / yearly.length);
+  near(record.value, 0.15);
+  assert.equal(record.inputs.length, 6);
+  assert.equal(harvestLossRecord({}), null);
 });

@@ -2,7 +2,9 @@
 .venv
 **/node_modules
 frontend/dist
-data/raw
+data/raw/**
+!data/raw/ers/
+!data/raw/ers/oats.csv
 data/cache
 **/__pycache__
 .pytest_cache

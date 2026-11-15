@@ -15,8 +15,8 @@
       "functions": {
         "deployment/vercel_app.py": {
           "maxDuration": 300,
-          "includeFiles": "data/{reference,validation}/**",
-          "excludeFiles": "{frontend/**,tests/**,docs/**,scripts/**,data/raw/**,data/cache/**,.venv/**,.git/**}"
+          "includeFiles": "{data/reference/**,data/validation/**,data/prices/**,data/raw/ers/oats.csv}",
+          "excludeFiles": "{frontend/**,tests/**,docs/**,scripts/**,data/raw/**/*.pdf,data/cache/**,.venv/**,.git/**}"
         }
       }
     }
