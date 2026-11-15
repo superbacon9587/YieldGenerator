@@ -1,4 +1,5 @@
 import pytest
+from statistics import median
 
 from backend import economics
 from backend import simulate as sim
@@ -22,7 +23,7 @@ def test_revenue_and_cost_formula(weather):
                         weather, make_context())
     y = resp.blocks[0].yearly[0]
     price = CROP_PRICES.get("almonds", y.year, "current")  # $ / LB
-    assert y.revenue == pytest.approx(y.relative_yield * 2000 * 40 * price.value, abs=50)
+    assert y.revenue == pytest.approx(y.relative_yield / median(r.relative_yield for r in resp.blocks[0].yearly) * 2000 * 40 * price.value, abs=50)
     water = 0.5 * 50 + 0.5 * pump_cost(2004)
     assert y.cost == pytest.approx(3000 * 40 + y.water_applied_af * water, abs=50)
     assert y.profit == pytest.approx(y.revenue - y.cost, abs=1)
@@ -34,7 +35,7 @@ def test_tons_yield_priced_per_ton(weather):
     y = resp.blocks[0].yearly[0]
     price = CROP_PRICES.get("walnuts", y.year, "current")
     assert economics.normalize_unit(price.unit) == "TON"
-    assert y.revenue == pytest.approx(y.relative_yield * 1.9 * 10 * price.value, abs=10)
+    assert y.revenue == pytest.approx(y.relative_yield / median(r.relative_yield for r in resp.blocks[0].yearly) * 1.9 * 10 * price.value, abs=10)
 
 
 def test_pounds_yield_priced_per_ton_converts(weather):
@@ -51,7 +52,7 @@ def test_bushels_use_crop_test_weight(weather):
     resp = sim.simulate(request([block(crop="corn", acres=15)]), weather, make_context())
     y = resp.blocks[0].yearly[0]
     price = CROP_PRICES.get("corn", y.year, "current")  # $ / BU
-    assert y.revenue == pytest.approx(y.relative_yield * 160 * 15 * price.value, abs=10)
+    assert y.revenue == pytest.approx(y.relative_yield / median(r.relative_yield for r in resp.blocks[0].yearly) * 160 * 15 * price.value, abs=10)
 
 
 def test_missing_cost_gives_null_money_but_keeps_water(weather):
@@ -115,7 +116,7 @@ def test_historical_prices_differ_by_year(weather):
                         weather, make_context())
     for c, h in zip(cur.blocks[0].yearly, hist.blocks[0].yearly):
         price = CROP_PRICES.get("almonds", h.year, "historical")
-        assert h.revenue == pytest.approx(h.relative_yield * 2000 * 10 * price.value, abs=10)
+        assert h.revenue == pytest.approx(h.relative_yield / median(r.relative_yield for r in hist.blocks[0].yearly) * 2000 * 10 * price.value, abs=10)
         assert h.revenue != c.revenue
     assert any("that year's" in a for a in hist.assumptions)
 

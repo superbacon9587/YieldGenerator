@@ -55,7 +55,7 @@ Method, per block and per season year:
     gdd_base_c) over active days, no upper cutoff.
 
 Money, per block and season year (backend/economics.py helpers):
-    revenue = relative_yield x baseline_yield x acres x crop price
+    revenue = (rounded relative_yield / median rounded relative_yield) x baseline_yield x acres x crop price
     cost    = cost_excl_water x acres + surface water cost + groundwater pumping cost
 Baseline yields, production costs, and the surface water price come only from
 get_location_context(lat, lon) (backend/regions.py, Marco's). Applied water is
@@ -595,7 +595,11 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
         label = b.crop.replace("_", " ")
         base = ctx["baseline_yields"].get(b.crop)
         prod = ctx["production_costs"].get(b.crop)
+        relative = [round(bt.seasons[b.id][y].relative_yield, 3) for y in bt.years]
+        typical = median(relative)
         missing: dict[str, None] = {}
+        if not typical:
+            missing["nonzero median modeled yield"] = None
         if base is None:
             missing["baseline yield"] = None
         if prod is None:
@@ -606,17 +610,18 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
                 missing["crop price"] = None
             if bt.water_cost_per_af[y] is None:
                 missing["water price"] = None
-            if price is None or base is None or prod is None or bt.water_cost_per_af[y] is None:
+            if price is None or base is None or prod is None or bt.water_cost_per_af[y] is None or not typical:
                 s.revenue = s.cost = None
                 continue
             per_acre = economics.convert_quantity(base["value"], base["unit"], price.unit, b.crop)
-            s.revenue = s.relative_yield * per_acre * b.acres * price.value
+            s.revenue = round(s.relative_yield, 3) / typical * per_acre * b.acres * price.value
             s.cost = (prod["cost_excl_water"] * b.acres
                       + s.water_applied_af * bt.water_cost_per_af[y])
         if missing:
             notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
                   "cost, and profit are shown as no data."] = None
 
+    notes["Revenue uses the same median-normalized harvest quantity as the harvest-weight display."] = None
     if mode == "current":
         notes["Prices: the latest USDA NASS price for each crop is used for every year."] = None
     else:
@@ -745,4 +750,8 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
         from backend.comparisons import build_comparisons
         response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
     from backend import summary
-    return summary.add_to_response(response, request, ctx)
+    response = summary.add_to_response(response, request, ctx)
+    if include_comparisons:
+        from backend import calculations
+        response.calculation_details = calculations.build(bt, response, wx)
+    return response

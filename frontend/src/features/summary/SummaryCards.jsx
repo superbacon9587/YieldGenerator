@@ -1,6 +1,13 @@
-import { Droplets, PiggyBank, TrendingUp, Wallet, CalendarRange } from "lucide-react";
+import {
+  Droplets,
+  PiggyBank,
+  TrendingUp,
+  Wallet,
+  CalendarRange,
+} from "lucide-react";
 import { money, number, percent } from "../../domain.js";
 import { summaryOf } from "./landBudget.js";
+import { MetricInfo } from "../provenance/CalculationDetails.jsx";
 import HarvestCard from "../yield/HarvestCard.jsx";
 import "./summary.css";
 
@@ -9,6 +16,18 @@ function Card({ label, value, detail, icon: Icon }) {
     <div className="metric summary-card">
       <span className="metric-label">
         {label}
+        <MetricInfo
+          metric={
+            label.includes("margin")
+              ? "profit"
+              : label.includes("water")
+                ? "water"
+                : label.includes("relative")
+                  ? "relative"
+                  : "summary"
+          }
+          label={label}
+        />
         <Icon size={17} />
       </span>
       <strong>{value}</strong>
@@ -31,16 +50,18 @@ export default function SummaryCards({ result }) {
         relativeYield={s.avg_relative_yield}
       />
       <Card
-        label="Total profit"
+        label="Total estimated margin"
         value={money(s.total_profit)}
         detail={`Over ${years} years`}
         icon={PiggyBank}
       />
       <Card
-        label="Average profit per year"
+        label="Estimated margin per year"
         value={money(s.avg_profit)}
         detail={
-          s.avg_cost == null ? "Cost not available" : `Average cost ${money(s.avg_cost)}`
+          s.avg_cost == null
+            ? "Cost not available"
+            : `Estimated cost ${money(s.avg_cost)}/year`
         }
         icon={Wallet}
       />
@@ -63,6 +84,7 @@ export default function SummaryCards({ result }) {
       <div className="metric year-metric summary-card">
         <span className="metric-label">
           Best and worst year
+          <MetricInfo metric="ranking" />
           <CalendarRange size={17} />
         </span>
         <div>
