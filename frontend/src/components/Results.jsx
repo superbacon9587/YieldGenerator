@@ -399,7 +399,7 @@ export default function Results({ farm, result, mock, onBack }) {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-              <ChartDataTable data={chartData} title={chart === "water" && moneyScope === "farm" ? "Whole farm (bars stacked by crop)" : scopeName} />
+              <ChartDataTable result={result} data={chartData} title={chart === "water" && moneyScope === "farm" ? "Whole farm (bars stacked by crop)" : scopeName} />
             </>
           )}
           {(chart === "profit" || chart === "cost") && (

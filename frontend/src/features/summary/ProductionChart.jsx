@@ -70,7 +70,7 @@ export default function ProductionChart({ result }) {
                 Not available: no baseline yield for this crop here.
               </div>
             )}
-            <ChartDataTable data={data} title={blockLabel(block, result.blocks)} />
+            <ChartDataTable result={result} data={data} title={blockLabel(block, result.blocks)} />
           </div>
         );
       })}

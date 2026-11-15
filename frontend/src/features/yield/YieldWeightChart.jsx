@@ -213,6 +213,7 @@ export default function YieldWeightChart({ result, mock }) {
         </p>
       )}
       <ChartDataTable
+        result={result}
         data={data}
         title={selected === ALL ? "Whole farm (bars stacked by crop)" : blockLabel(selectedBlock, blocks)}
       />

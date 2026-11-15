@@ -287,3 +287,7 @@
 .calc-inputs thead th:nth-child(1) { width:48%; }
 .calc-inputs thead th:nth-child(2) { width:32%; }
 .calc-inputs thead th:nth-child(3) { width:20%; }
+
+.chart-guide { margin:12px 0; padding:12px 16px; border-left:3px solid #82976b; background:#f3f5ee; border-radius:4px; font-size:13px; line-height:1.6; }
+.chart-guide p { margin:4px 0; }
+.chart-guide a { color:#315f43; text-decoration:underline; }

@@ -1,18 +1,22 @@
 import { useState } from "react";
 import { CalcInfo } from "../provenance/CalcPopover.jsx";
-import { tableCells, tableHeaders, tableRecordId } from "../provenance/chartData.js";
+import { tableCells, tableHeaders, tableRecordId, chartGuide } from "../provenance/chartData.js";
 
-const COLUMNS = ["harvest", "sales", "cost", "margin", "water", "yield"];
+import { sourceParts } from "../provenance/calcRecords.js";
 
 /**
  * The numbers behind the chart above it. `data` is the same getChartRows() result
  * the chart plots, so every cell is the bar it sits under; this component only
  * prints it. Average row cells open their calculation record.
  */
-export default function ChartDataTable({ data, title }) {
+export default function ChartDataTable({ data, title, result }) {
   const [shown, setShown] = useState(true);
   if (!data?.rows.length) return null;
   const { scope, perAcre } = data.view;
+  const guide = chartGuide(data.view);
+  const columns = guide.columns;
+  const record = result?.calculations?.[tableRecordId(scope, perAcre, data.totalKey)];
+  const links = [...new Map((record?.inputs ?? []).flatMap(input => sourceParts(input).links).map(link => [link.url,link])).values()];
   const head = tableHeaders(data.view);
   const cells = tableCells(data);
   const anyDrought = data.rows.some((r) => r.drought);
@@ -22,6 +26,12 @@ export default function ChartDataTable({ data, title }) {
     ) : null;
   return (
     <div className="chart-data">
+      <aside className="chart-guide" aria-label="Graph formula and data sources">
+        <p><strong>Formula:</strong> {guide.formula}</p>
+        <p><strong>Data:</strong> {guide.sources}</p>
+        {links.length > 0 && <p className="calc-links">{links.map(link => <a key={link.url} href={link.url} target="_blank" rel="noreferrer">{link.label}</a>)}</p>}
+        <p className="caption">{guide.notes}</p>
+      </aside>
       <div className="chart-data-head">
         <span className="caption">
           {title}
@@ -43,7 +53,7 @@ export default function ChartDataTable({ data, title }) {
             <thead>
               <tr>
                 <th>{head.year}</th>
-                {COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <th key={c}>{head[c]}</th>
                 ))}
               </tr>
@@ -52,26 +62,21 @@ export default function ChartDataTable({ data, title }) {
               {cells.rows.map((r, i) => (
                 <tr key={r.year} className={data.rows[i].drought ? "drought-row" : ""}>
                   <th scope="row">{r.year}</th>
-                  {COLUMNS.map((c) => (
+                  {columns.map((c) => (
                     <td key={c}>
                       {r[c]}
-                      {c === "margin" && r.marginPct && <small className="table-pct">{r.marginPct}</small>}
+
                     </td>
                   ))}
                 </tr>
               ))}
               <tr className="average-row">
                 <th scope="row">Average</th>
-                {COLUMNS.map((c) => (
+                {columns.map((c) => (
                   <td key={c}>
                     {cells.average[c]}
                     {info(c, cells.average[c])}
-                    {c === "margin" && cells.average.marginPct && (
-                      <small className="table-pct">
-                        {cells.average.marginPct}
-                        {info("marginPct", cells.average.marginPct)}
-                      </small>
-                    )}
+
                   </td>
                 ))}
               </tr>

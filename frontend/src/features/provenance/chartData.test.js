@@ -167,3 +167,19 @@ test("cost bars use annual costs and the average matches the same table rows", (
  assert.equal(empty.average.cost,null);
  assert.ok(empty.rows.every(row=>plottedTotal(empty,row)===null));
 });
+
+test("graph-specific columns change presentation without changing values", async () => {
+ const {chartGuide}=await import("./chartData.js");
+ const expected={yield:["harvest","yield"],production:["harvest"],water:["water"],profit:["sales","cost","margin"],cost:["water","cost"]};
+ for(const [chart,columns] of Object.entries(expected)) {
+  const data=getChartRows(sample,{chart,scope:"farm",unit:"tons"});
+  const before=JSON.stringify(data);
+  const guide=chartGuide(data.view);
+  assert.deepEqual(guide.columns,columns);
+  const cells=tableCells(data);
+  for(const row of cells.rows) for(const column of columns) assert.equal(row[column],formatCell(column,data.rows.find(r=>r.year===Number(row.year))[column],data.view));
+  assert.equal(JSON.stringify(data),before);
+  assert.match(guide.formula,/=/);
+  assert.ok(guide.sources.length);
+ }
+});
