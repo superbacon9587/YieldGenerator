@@ -70,3 +70,7 @@ npm run dev
 ```
 
 Keep both windows open. Select Live backend, run the default Merced farm, and check county, cost region, crop-by-crop results, and assumptions. The first real run may take longer while NASA weather is downloaded and cached. A historical backtest is a model of past conditions, not a guaranteed future harvest.
+
+## What-if comparisons
+
+Use What if things were different on Results to edit a crop entry's crop, acreage, irrigation, or annual growing months, then click Compare scenario. The quick water-limit and all-drip comparisons remain available. Each scenario uses the same historical years and leaves the original farm unchanged. There is no separate System comparisons section.
