@@ -168,7 +168,7 @@ export function getChartRows(response, view = {}) {
     totalKey = "water";
     series = blocks.map((b) => ({ key: `water_${b.id}`, metric: "water", label: label(b, blocks), color: CROPS[b.crop]?.color ?? "#557f65", blockId: b.id }));
   } else {
-    totalKey = { yield: "harvest", production: "harvest", water: "water", profit: "margin" }[chart];
+    totalKey = { yield: "harvest", production: "harvest", water: "water", profit: "margin", cost: "cost" }[chart];
     series = one(totalKey);
   }
   return { view: { chart, scope, perAcre, unit }, rows, average, series, totalKey, stacked: series.length > 1 || series[0]?.key !== totalKey };

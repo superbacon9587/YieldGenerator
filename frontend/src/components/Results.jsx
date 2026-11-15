@@ -192,7 +192,7 @@ export default function Results({ farm, result, mock, onBack }) {
   // Water and profit charts: whole farm or one crop. The chart and its table share these rows.
   const [moneyScope, setMoneyScope] = useState("farm");
   const chartData = getChartRows(result, {
-    chart: chart === "water" ? "water" : "profit",
+    chart: chart === "water" ? "water" : chart === "cost" ? "cost" : "profit",
     scope: moneyScope,
     unit: yieldUnit,
   });
@@ -295,11 +295,11 @@ export default function Results({ farm, result, mock, onBack }) {
                     ? "Where the water goes"
                     : chart === "production"
                       ? "What each crop produced"
-                      : "The economics, year by year"}
+                      : chart === "cost" ? "Operating cost, year by year" : "The economics, year by year"}
               </h2>
             </div>
             <div className="segmented chart-tabs" aria-label="Chart view">
-              {["yield", "water", "profit", "production"].map((key) => (
+              {["yield", "water", "profit", "cost", "production"].map((key) => (
                 <button
                   key={key}
                   aria-pressed={chart === key}
@@ -311,7 +311,7 @@ export default function Results({ farm, result, mock, onBack }) {
                       ? "Water"
                       : key === "profit"
                         ? "Profit"
-                        : "Production"}
+                        : key === "cost" ? "Cost" : "Production"}
                 </button>
               ))}
             </div>
@@ -360,7 +360,7 @@ export default function Results({ farm, result, mock, onBack }) {
                     <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#e5e9df" />
                     <XAxis dataKey="year" tick={{ fontSize: 11 }} minTickGap={28} />
                     <YAxis
-                      tickFormatter={(v) => (chart === "profit" ? `$${number(v / 1000)}k` : number(v))}
+                      tickFormatter={(v) => ((chart === "profit" || chart === "cost") ? `$${number(v / 1000)}k` : number(v))}
                       tick={{ fontSize: 11 }}
                       width={58}
                     />
@@ -385,11 +385,11 @@ export default function Results({ farm, result, mock, onBack }) {
                           <Bar key={sr.key} dataKey={sr.key} name={sr.label} stackId="water" fill={sr.color} isAnimationActive={false} />
                         ))
                       : chartData.series.map((sr) => (
-                          <Bar key={sr.key} dataKey={sr.key} name={`${sr.label} margin`} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                          <Bar key={sr.key} dataKey={sr.key} name={`${sr.label} ${chart === "cost" ? "operating cost" : "margin"}`} radius={[3, 3, 0, 0]} isAnimationActive={false}>
                             {chartData.rows.map((r) => (
                               <Cell
                                 key={r.year}
-                                fill={r.margin >= 0 ? "#4e795d" : "#bb684f"}
+                                fill={chart === "cost" ? "#c04444" : r.margin >= 0 ? "#4e795d" : "#bb684f"}
                                 stroke={moneyScope === "farm" && overBudget.has(r.year) ? "#d39a2c" : undefined}
                                 strokeWidth={moneyScope === "farm" && overBudget.has(r.year) ? 3 : 0}
                               />
@@ -402,11 +402,11 @@ export default function Results({ farm, result, mock, onBack }) {
               <ChartDataTable data={chartData} title={chart === "water" && moneyScope === "farm" ? "Whole farm (bars stacked by crop)" : scopeName} />
             </>
           )}
-          {chart === "profit" && (
+          {(chart === "profit" || chart === "cost") && (
             <p className="caption">
               {overBudget.size > 0 &&
                 "Amber outline: farm cost was above your budget that year. "}
-              Missing profit remains unavailable, not zero. Farm financial
+              Missing financial values remain unavailable, not zero. Farm financial
               totals may include only crops with price and cost data; check the
               assumptions.
             </p>

@@ -24,7 +24,7 @@ function views() {
   for (const unit of UNITS) {
     for (const scope of ["farm", ...blockIds])
       for (const perAcre of [false, true]) out.push({ chart: "yield", scope, perAcre, unit });
-    for (const chart of ["water", "profit"])
+    for (const chart of ["water", "profit", "cost"])
       for (const scope of ["farm", ...blockIds]) out.push({ chart, scope, perAcre: false, unit });
     for (const scope of blockIds) out.push({ chart: "production", scope, perAcre: false, unit });
   }
@@ -155,3 +155,15 @@ test("rounding matches the backend: half up on the decimal digits", () => {
 });
 
 test.after(() => console.log(`chart and table checks: ${checks}`));
+
+test("cost bars use annual costs and the average matches the same table rows", () => {
+ const data=getChartRows(sample,{chart:"cost",scope:"farm",unit:"tons"});
+ assert.equal(data.totalKey,"cost");
+ for(const row of data.rows) assert.equal(plottedTotal(data,row),sample.farm_totals.find(y=>y.year===row.year).cost);
+ const known=data.rows.map(r=>r.cost).filter(v=>v!=null);
+ assert.equal(data.average.cost,rnd(exactSum(known)/known.length));
+ const missing={...sample,blocks:sample.blocks.map(b=>({...b,yearly:b.yearly.map(y=>({...y,cost:null}))})),farm_totals:sample.farm_totals.map(y=>({...y,cost:null}))};
+ const empty=getChartRows(missing,{chart:"cost",scope:"farm"});
+ assert.equal(empty.average.cost,null);
+ assert.ok(empty.rows.every(row=>plottedTotal(empty,row)===null));
+});
