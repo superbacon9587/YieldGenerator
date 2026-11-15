@@ -110,6 +110,30 @@ export function inWeightUnit(record, weightUnit) {
   };
 }
 
+export const COST_PART_NAMES = ["Inputs", "Harvest", "Water", "Irrigation system"];
+
+/**
+ * The four cost parts (inputs + harvest + water + irrigation system) of a cost or
+ * margin record, as the info box lists them, or null when the record has none.
+ * Block records carry cents; table averages are whole dollars, so their parts can
+ * differ from the total by $1 after rounding.
+ */
+export function costParts(record) {
+  const parts = record?.parts;
+  if (!Array.isArray(parts) || !parts.length) return null;
+  const cents = parts.some((p) => finite(p.value) && !Number.isInteger(p.value));
+  const rows = parts
+    .filter((p) => finite(p.value))
+    .map((p) => ({ name: p.name, value: p.value, text: signedMoney(p.value, cents ? 2 : 0), note: p.step }));
+  const sum = rows.reduce((s, r) => s + r.value, 0);
+  return {
+    rows,
+    sum,
+    sumText: signedMoney(Math.round(sum)),
+    formula: "Cost = inputs + harvest + water + irrigation system",
+  };
+}
+
 /** True when the number depends on any estimated input. */
 export const isEstimated = (record) =>
   Boolean(record?.is_estimate ?? record?.inputs?.some((i) => i.is_estimate));

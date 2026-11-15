@@ -28,7 +28,7 @@ def client(monkeypatch):
 
 
 def test_simulate_endpoint(client, monkeypatch):
-    # corn has a statewide baseline and oats has no production cost.
+    # corn has a statewide baseline; oats on sprinkler has no irrigation system cost data.
     monkeypatch.setattr(sim, "get_location_context", lambda lat, lon: make_context())
     r = client.post("/api/simulate", json=BODY)
     assert r.status_code == 200, r.text
@@ -37,10 +37,11 @@ def test_simulate_endpoint(client, monkeypatch):
                          "waste_flags", "assumptions", "comparisons",
                          "summary_stats", "budget", "land", "yield_weight", "calculation_details",
                          "calculations"}
-    # 3 blocks x 3 other irrigation types, plus corn and oats planting windows
+    # Only irrigation types with cost data are offered: almonds drip -> micro-sprinkler,
+    # oats sprinkler -> flood, corn (flood only) none; plus corn and oats planting windows
     # (each window list from crops.json minus the current start month).
     kinds = [row["kind"] for row in data["comparisons"]]
-    assert kinds.count("irrigation") == 9 and kinds.count("planting_window") == 6
+    assert kinds.count("irrigation") == 2 and kinds.count("planting_window") == 6
     assert all("excludes" in row for row in data["comparisons"])
     assert data["location"]["county"] == "Merced"
     assert data["location"]["cost_region"] == "San Joaquin Valley North"
@@ -50,7 +51,7 @@ def test_simulate_endpoint(client, monkeypatch):
     corn = next(b for b in data["blocks"] if b["id"] == "b3")
     assert all(y["profit"] is not None for y in corn["yearly"])
     assert any("statewide median" in a for a in data["assumptions"])
-    assert any("b2 (oats)" in a for a in data["assumptions"])
+    assert any("b2 (oats): No cost data for sprinkler irrigation on oats" in a for a in data["assumptions"])
     assert any(f["block_id"] == "b3" and f["type"] == "irrigation_method"
                for f in data["waste_flags"])
 

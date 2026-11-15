@@ -268,3 +268,28 @@
     border-color: #8a6a2a;
   }
 }
+
+.calc-parts {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  min-width: 260px;
+}
+.calc-parts caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 4px;
+}
+.calc-parts th,
+.calc-parts td {
+  padding: 3px 10px 3px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.calc-parts td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.calc-parts-total th,
+.calc-parts-total td {
+  font-weight: 700;
+  border-bottom: none;
+}

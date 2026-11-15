@@ -52,7 +52,7 @@ The Pydantic models in [backend/schemas.py](../backend/schemas.py) are the code 
 | `location.lon` | number | yes | -180 to 180 |
 | `location.label` | string | no | Display name, echoed back |
 | `years` | `[start, end]` | yes | Inclusive. 1984 or later, start no later than end, and no later than last year |
-| `price_mode` | `"current"` or `"historical"` | no, default `"current"` | `current` uses the latest price for every year. `historical` uses each year's own price |
+| `price_mode` | `"current"` or `"historical"` | no, default `"current"` | `current` uses the latest crop price and the latest year in `data/prices/cost_indexes.csv` for every year, so only the weather changes. `historical` uses each year's own crop price and cost indexes (the nearest year when a year has none, flagged as an estimate) |
 | `blocks` | list | yes, at least 1 | Block ids must be unique |
 | `blocks[].id` | string | yes | Short id such as `"b1"` |
 | `blocks[].crop` | crop id | yes | See crop ids below |
@@ -166,7 +166,7 @@ One entry per season year, in the same order as `years`.
 | `heat_stress_days` | int | Days above the crop's heat stress threshold in the season |
 | `gdd` | number | Growing degree days over the season |
 | `revenue` | number or null | (relative_yield / median relative_yield over this block's backtest) x baseline_yield x acres x price; same harvest basis as yield_weight |
-| `cost` | number or null | Production cost excluding water, plus surface water cost, plus groundwater pumping cost |
+| `cost` | number or null | `backend/economics.block_cost`: inputs + harvest + water + irrigation system (see "How cost is calculated") |
 | `profit` | number or null | revenue - cost |
 
 ### `farm_totals[]`
@@ -286,10 +286,13 @@ For each month, the acres of every block growing that month are added up (Nov to
 The backtest year range and the period presets that fit inside it. No request body.
 
 ```json
-{ "first_year": 1985, "last_full_year": 2025, "presets": [5, 10, 20, 30, 40] }
+{ "first_year": 1985, "last_full_year": 2025, "presets": [5, 10, 20, 30, 40],
+  "irrigation_by_crop": { "almonds": ["drip", "micro_sprinkler"], "corn": ["flood"], "oats": ["flood"], "...": [] } }
 ```
 
 `first_year` is 1985: NASA POWER data starts in 1984, and a season that wraps the new year needs the previous year. `last_full_year` is December 31 of last year. Presets longer than the available history are dropped.
+
+`irrigation_by_crop` lists the irrigation types with cost data for each crop: a UC Davis study for the crop (any conventional region; another region's study is used and flagged as an estimate) prices that irrigation system, or for oats the USDA ERS national average. Other combinations are not offered: the form leaves them out, the optimizer excludes them ("Excluded, no cost data for this irrigation system: ..."), comparisons skip them, and a simulate request that uses one gets null revenue, cost, and profit with a note naming the types that have data. A system cost is never $0 for missing data. Oats on flood show $0 because the ERS whole-farm average per planted acre already includes those costs.
 
 ## POST /api/compare
 
@@ -516,7 +519,18 @@ The payload contains the model/data commit, financial coverage and exclusions, a
 
 **Revenue alignment change:** revenue now values the same median-normalized harvest as `yield_weight`, using rounded relative yields (as the harvest module does). The previous revenue formula omitted the median denominator and could disagree with the harvest displayed. This changes financial outputs and optimizer objectives. Dollars remain rounded to whole units in ordinary result rows; audit intermediates remain unrounded. A zero median yields unavailable harvest and financial outputs.
 
-**Costs are estimates, not farmer expenses.** They use the context-selected regional cost study excluding water, multiplied by acreage, plus modeled water cost. The study is held fixed across weather years, with no inflation adjustment. `optional.budget_usd` is a budget constraint/check, never an expense observation or a replacement for production cost. No actual-cost override was added here.
+**Costs are estimates, not farmer expenses.** They come from `backend/economics.block_cost`, the one cost function used by simulate, summary, compare, comparisons, and optimize.
+
+How cost is calculated, per crop block and simulated year (`year_used` is the latest index year in `current` mode, the simulated year in `historical` mode):
+
+- inputs = sum of the study's per-acre components (`data/prices/cost_components.csv`) x acres x index[year_used] / index[study year]
+- harvest = per-ton harvest and haul component x simulated tons x diesel[year_used] / diesel[study year]
+- water = surface acre-ft x surface water price + groundwater acre-ft x well lift ft x 1.024 kWh / pump efficiency x electricity[year_used]
+- irrigation system = the study's installed cost / system life for the block's irrigation type x acres x ratio
+
+Oats have no UC Davis study: their operating costs are the USDA ERS Commodity Costs and Returns U.S. total per planted acre (`data/raw/ers/oats.csv`), each year's own value in `historical` mode and the latest year in `current` mode, with no index scaling, marked as an estimate.
+
+Indexes are the USDA NASS prices-paid indexes and U.S. EIA diesel and California commercial electricity prices in `data/prices/cost_indexes.csv`. Components with no index of their own ("other" and irrigation systems) use the dollar-weighted average ratio of the crop's indexed components. A crop's study comes from the location's cost region, else the nearest region with one; when that study prices no system for the chosen irrigation type, the same crop's nearest study that does is used and flagged as an estimate. Profit = simulated tons x crop price - cost. `optional.budget_usd` is a budget constraint/check, never an expense observation or a replacement for production cost. No actual-cost override was added here.
 
 Dollar totals still include only entries with all required financial inputs. Harvest/water totals can have broader coverage; `excluded_financial_blocks` makes that explicit. These dollar values are modeled margins on priced crops, not verified net farm income. The audit surfaces conflicting cost study year versus PDF-filename metadata as provisional instead of claiming it was verified. Tracing sources is separate from validating predictive accuracy.
 
@@ -543,6 +557,8 @@ Input sources are written for a farmer (backend/sources.py), never a code file. 
 
 Ids: `summary.<field>` (avg_profit, avg_cost, avg_revenue, total_profit, avg_relative_yield, avg_water_applied_af, avg_yield_tons, best_year, worst_year, worst_profit, years_over_budget), `block.<id>.<year>.<field>` (crop_water_use_in, effective_rain_in, water_applied_af, relative_yield, tons_per_acre, tons, heat_stress_days, gdd, profit), `table.<farm|block id>.<total|per_acre>.<metric>` (Average row of the data table under each chart: harvest, sales, cost, margin, margin_pct, water, yield), optimizer `block.<id>.avg_profit`, `block.<id>.avg_yield_tons`, and `difference.<field>`.
 
-Rules (tests/test_hand_calculator.py): each step's `expr` is basic arithmetic (+ - * / and parentheses) on numbers that are input values or earlier step results; every conversion factor (2,000 lb/ton, bushel weights, 25.4 mm/in, 304.8 mm/ft, 1.02 kWh per acre-ft per ft, 100 cents/$) and count of years is an input. `result` is the expression rounded half up to `round` decimals when `round` is set. The last result equals `value`, which equals the number in the response. Each record has a one-line `rounding` rule, and weight records carry an `lb` version built from the same rows. Model outputs (water balance, relative yield) appear as inputs tagged as estimates.
+Cost records: `block.{id}.{year}.cost` (and the margin record `block.{id}.{year}.profit`) show cost = inputs + harvest + water + irrigation system. The steps compute each part with its numbers (index ratios, then "Inputs cost", "Harvest cost", "Water cost" from surface water and groundwater pumping, "Irrigation system cost") and add them in that order to the displayed cost. These records, the table's average cost boxes, and `summary.avg_cost` also carry `parts`: `[{name, value, step}]` for the four parts, which the info box lists above the steps. Input sources: UC Davis component amounts name the study and link its PDF (estimate: "Typical practice amounts from the UC Davis cost study, not this farm's actual records"); NASS indexes say "USDA NASS Prices Paid Index (2011=100)" and link Quick Stats; EIA diesel and electricity link the EIA series page; simulated acre-ft and tons say "YieldGenerator simulation using NASA POWER weather" and link https://power.larc.nasa.gov; the well lift is an estimate ("Team assumption"). No source link points to code or a commit.
+
+Rules (tests/test_hand_calculator.py): each step's `expr` is basic arithmetic (+ - * / and parentheses) on numbers that are input values or earlier step results; every conversion factor (2,000 lb/ton, bushel weights, 25.4 mm/in, 304.8 mm/ft, 1.024 kWh per acre-ft per ft, 100 cents/$) and count of years is an input. `result` is the expression rounded half up to `round` decimals when `round` is set. The last result equals `value`, which equals the number in the response. Each record has a one-line `rounding` rule, and weight records carry an `lb` version built from the same rows. Model outputs (water balance, relative yield) appear as inputs tagged as estimates.
 
 Money is computed at the rounding points the boxes show (backend/simulate.py apply_money): harvest to 0.01 ton, sales = harvest in the price unit x price to $1, cost = production + surface water + groundwater pumping (each to $0.01, water to 0.0001 acre-ft) to $1, margin = sales - cost. Farm rows are sums of crop rows. Averages are the exact decimal sum / years, half up; the average margin is average sales - average cost. backend/rounding.py and frontend/src/features/provenance/chartData.js use the same half-up rule, and every chart and its table read one selector, getChartRows. `value` is in the display unit (percent values are x 100). Input `kind` is farmer, nasa or nass for reported data; anything else is either `is_estimate` with an `estimate_reason` or has a `not_estimate_reason` (for example a physical constant). Records with no value (missing prices) are left out.

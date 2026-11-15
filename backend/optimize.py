@@ -15,7 +15,8 @@ Steps:
     the backtest years, with no farm water limit. Per year it records gross
     water applied, relative yield, tons per acre (backend/units.py through the
     shared yield_weight scaling), revenue, revenue at current prices, and total
-    cost including water (surface and groundwater split as in /api/simulate),
+    cost from economics.block_cost (inputs, per-ton harvest, irrigation system,
+    and water with the surface and groundwater split as in /api/simulate),
     plus the months the land is occupied. Results are cached per option. Each
     annual option also gets frost_risk_share (backend/frost.py): the share of
     backtest years with a daily minimum at or below 0 C in the first 45 days
@@ -172,11 +173,15 @@ _CACHE: OrderedDict[tuple, Option | str] = OrderedDict()
 def _common_key(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> tuple:
     fingerprint = int(pd.util.hash_pandas_object(wx, index=True).sum())
     return (req.location.lat, req.location.lon, tuple(req.years), req.price_mode, req.soil,
-            fingerprint, json.dumps(ctx, sort_keys=True, default=str))
+            req.surface_water_share, fingerprint, json.dumps(ctx, sort_keys=True, default=str))
 
 
 def _crop_label(crop: str) -> str:
     return crop.replace("_", " ").capitalize()
+
+
+IRRIGATION_NAMES = {"drip": "drip", "micro_sprinkler": "micro-sprinkler", "sprinkler": "sprinkler",
+                    "flood": "flood"}
 
 
 def _crop_noun(crop: str) -> str:
@@ -224,7 +229,8 @@ def evaluate_options(req: OptimizeRequest, keys: list[OptionKey], wx: pd.DataFra
                       start_month=k.start_month, end_month=k.end_month)
               for i, k in enumerate(todo)]
     sim = SimulateRequest(location=req.location, years=req.years, price_mode=req.price_mode,
-                          blocks=blocks, optional=OptionalIn(soil=req.soil))
+                          blocks=blocks,
+                          optional=OptionalIn(soil=req.soil, surface_water_share=req.surface_water_share))
     bt = engine.run_backtest(sim, wx)
     bt.context = ctx
     engine.apply_money(bt, ctx, rounded=False)
@@ -275,6 +281,7 @@ class Problem:
     excluded: dict[str, None] = field(default_factory=dict)
     frost: dict[tuple[str, int], frost.FrostRisk] = field(default_factory=dict)  # (crop, start)
     frost_excluded: int = 0                                     # options left out for frost
+    no_cost_excluded: list[str] = field(default_factory=list)   # "almond on flood", ...
 
     @property
     def budget_limit(self) -> float:
@@ -309,6 +316,7 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
 
     keys = []
     frost_left_out: list[str] = []
+    no_cost: dict[str, None] = {}   # crop and irrigation combinations with no system cost data
     for crop in crops:
         if crop in PERENNIALS and not req.allow_new_perennials and crop not in problem.locked:
             problem.excluded[f"{_crop_label(crop)} was left out: new perennial plantings are off "
@@ -323,11 +331,14 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
                 risk = frost.frost_risk(wx, start, end, years)
                 problem.frost[(crop, start)] = risk
                 if risk.above_limit and not reference.frost_tolerant(crop):
-                    problem.frost_excluded += len(irrigations)
+                    problem.frost_excluded += sum(engine.irrigation_available(crop, i) for i in irrigations)
                     frost_left_out.append(f"{_crop_noun(crop)} planted in {MONTH_NAMES[start - 1]} "
                                           f"({risk.frost_years} of {risk.years} years)")
                     continue
             for irr in irrigations:
+                if not engine.irrigation_available(crop, irr):
+                    no_cost[f"{_crop_noun(crop)} on {IRRIGATION_NAMES[irr]}"] = None
+                    continue
                 block = BlockIn(id="x", crop=crop, acres=1.0, irrigation=irr,
                                 start_month=start, end_month=end)
                 if _weather_covers(block, years, wx):
@@ -336,6 +347,12 @@ def build_problem(req: OptimizeRequest, wx: pd.DataFrame, ctx: dict) -> Problem:
                     problem.excluded[
                         f"{_crop_label(crop)} planted in {MONTH_NAMES[start - 1]} was left out: "
                         "its seasons need weather outside the available record."] = None
+
+    if no_cost:
+        problem.no_cost_excluded = list(no_cost)
+        problem.excluded[
+            f"Excluded, no cost data for this irrigation system (no UC Davis study for the crop prices "
+            f"it): {', '.join(no_cost)}."] = None
 
     if frost_left_out:
         n = problem.frost_excluded
@@ -515,7 +532,7 @@ def run_engine(req: OptimizeRequest, blocks: list[BlockIn], wx, ctx: dict) -> Si
         location=req.location, years=req.years, price_mode=req.price_mode,
         blocks=[BlockIn(**b.model_dump(include=set(BlockIn.model_fields))) for b in blocks],
         optional=OptionalIn(soil=req.soil, water_available_af=req.water_available_af,
-                            budget_usd=req.budget_usd),
+                            budget_usd=req.budget_usd, surface_water_share=req.surface_water_share),
         available_acres=req.available_acres)
     return engine.simulate(sim, wx=wx, context=ctx, include_comparisons=False)
 
@@ -748,7 +765,9 @@ def optimizer_notes(problem: Problem) -> list[str]:
         "Land is counted month by month, so a winter crop and a summer crop can share acres. "
         "Unplanted land has no cost and no income.",
         f"Acres are in steps of {ACRE_STEP:g} acre.",
-        "Changing irrigation type does not include installation cost.",
+        "Irrigation system cost is the UC Davis installed cost spread over the system's life, for the crop's "
+        "study; one-time conversion or removal costs are not included. Crop and irrigation combinations "
+        "with no system cost data are not offered.",
         "Frost does not lower modeled yields. It is used only to leave out planting windows "
         "of frost sensitive crops where frost occurred within 45 days of planting in more "
         "than 20 percent of the backtest years.",

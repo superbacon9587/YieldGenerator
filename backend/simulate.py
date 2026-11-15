@@ -54,15 +54,16 @@ Method, per block and per season year:
  9. Growing degree days. Simple average method, sum of max(0, (Tmax + Tmin)/2 -
     gdd_base_c) over active days, no upper cutoff.
 
-Money, per block and season year (backend/economics.py helpers):
+Money, per block and season year (backend/economics.py):
     revenue = (rounded relative_yield / median rounded relative_yield) x baseline_yield x acres x crop price
-    cost    = cost_excl_water x acres + surface water cost + groundwater pumping cost
+    cost    = economics.block_cost: inputs + harvest + water + irrigation system, from the
+              UC Davis cost components scaled by NASS/EIA cost indexes to the year used
 Baseline yields, production costs, and the surface water price come only from
 get_location_context(lat, lon) (backend/regions.py, Marco's). Applied water is
 split into surface water (optional.surface_water_share) priced at the context's
 surface_water_price_per_af, and groundwater priced with the pumping cost
 function (well lift and pump efficiency from defaults.json, electricity from
-utilities.csv). A block with no baseline yield, crop price, or production cost
+data/prices/cost_indexes.csv). A block with no baseline yield, crop price, or production cost
 gets null revenue, cost, and profit, and a note in assumptions.
 
 Waste flags are built in backend/waste.py. Harvest weight in tons (yield_weight) is built in
@@ -72,6 +73,7 @@ backend/yield_weight.py; summary_stats.avg_yield_tons is added by backend/summar
 from __future__ import annotations
 
 import calendar
+import dataclasses
 import csv
 import datetime as dt
 import json
@@ -544,13 +546,94 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
 
 # ---------------------------------------------------------------- money
 
-ELECTRICITY_SERIES = "electricity_commercial"
+@cache
+def _price_tables():
+    """(crop prices, None, defaults). The middle slot used to hold utilities.csv;
+    electricity now comes from data/prices/cost_indexes.csv (see _cost_tables)."""
+    return economics.load_crop_prices(), None, economics.load_defaults()
 
 
 @cache
-def _price_tables():
-    return (economics.load_crop_prices(), economics.load_utility_prices(),
-            economics.load_defaults())
+def _cost_tables():
+    return economics.load_cost_indexes(), economics.load_cost_components()
+
+
+@cache
+def _nearest_regions() -> dict[str, list[str]]:
+    return json.loads((reference.REFERENCE_DIR / "ca_regions.json").read_text())["nearest_regions"]
+
+
+def _conventional_regions(crop: str, table: dict) -> list[str]:
+    """Regions with a conventional UC Davis study for the crop, then its USDA ERS rows."""
+    regions = sorted(r for c, r in table if c == crop and "organic" not in r.lower()
+                     and "statewide" not in r.lower() and "(ERS)" not in r)
+    return regions + sorted(r for c, r in table if c == crop and "(ERS)" in r)
+
+
+def cost_components(crop: str, ctx: dict) -> list[economics.CostComponent] | None:
+    """cost_components.csv rows for the crop in the context's cost region.
+
+    Order: the point's cost region, the region of the context's production cost, their
+    nearest regions, any conventional UC Davis study for the crop, then the crop's USDA
+    ERS rows (crops with no UC Davis study, such as oats). With no context production
+    cost, only a crop that has no UC Davis study at all is costed (from its ERS rows). A
+    crop with a context production cost but no component rows uses that total as one
+    unscaled row (economics.total_cost_component). None when there is no cost data.
+    """
+    prod = ctx.get("production_costs", {}).get(crop)
+    table = _cost_tables()[1]
+    known = _conventional_regions(crop, table)
+    if prod is None:
+        # The context decides whether a UC Davis study applies here. Without one, only a
+        # crop that has no UC Davis study at all (USDA ERS rows, such as oats) is costed.
+        ers = [r for r in known if "(ERS)" in r]
+        return table[(crop, ers[0])] if ers and len(ers) == len(known) else None
+    region = prod.get("region") if prod else None
+    order = [ctx.get("cost_region"), region]
+    order += _nearest_regions().get(region, []) + _nearest_regions().get(ctx.get("cost_region"), []) + known
+    for r in order:
+        if r and (crop, r) in table:
+            return table[(crop, r)]
+    return economics.total_cost_component(prod["cost_excl_water"], prod.get("region", ""), prod.get("source", ""))
+
+
+@cache
+def irrigation_by_crop() -> dict[str, list[str]]:
+    """Irrigation types with cost data for each crop (economics.irrigation_by_crop)."""
+    return economics.irrigation_by_crop(_cost_tables()[1])
+
+
+def irrigation_available(crop: str, irrigation: str) -> bool:
+    return irrigation in irrigation_by_crop().get(crop, [])
+
+
+def no_system_cost_reason(crop: str, irrigation: str) -> str:
+    label = crop.replace("_", " ")
+    have = [i.replace("_", "-") for i in irrigation_by_crop().get(crop, [])]
+    text = (f"No cost data for {irrigation.replace('_', '-')} irrigation on {label}: no UC Davis study "
+            f"for {label} prices a {irrigation.replace('_', '-')} system.")
+    return text + (f" Irrigation types with cost data: {', '.join(have)}." if have else "")
+
+
+def with_irrigation_system(crop: str, comps: list[economics.CostComponent], irrigation: str, ctx: dict
+                           ) -> list[economics.CostComponent]:
+    """Add the irrigation system row for the block's irrigation type when the crop's study
+    has none: the same crop's study from the nearest region that prices that system,
+    flagged as an estimate. Unchanged when no study for the crop prices it."""
+    wanted = economics.SYSTEM_COMPONENT.get(irrigation)
+    if any(c.basis == "per_acre_system" and c.component == wanted for c in comps):
+        return comps
+    table = _cost_tables()[1]
+    region = comps[0].region if comps else None
+    order = [region] + _nearest_regions().get(region, []) + _conventional_regions(crop, table)
+    for other in order:
+        row = next((c for c in table.get((crop, other), []) if c.basis == "per_acre_system" and c.component == wanted),
+                   None)
+        if row is not None:
+            reason = (f"The {region} study prices no {irrigation.replace('_', '-')} system; "
+                      f"the {other} {row.base_year} study's system cost is used")
+            return comps + [dataclasses.replace(row, is_estimate=True, estimate_reason=reason)]
+    return comps
 
 
 def _lookup_price(table: economics.PriceTable, key: str, year: int, mode: str,
@@ -584,30 +667,25 @@ def sale_quantity(tons: float, price_unit: str, crop: str) -> tuple[float, str]:
     return tons * units.LB_PER_TON / economics.unit_to_lb(price_unit, crop), u
 
 
-def kwh_price(elec: economics.Price) -> float:
-    """Electricity in $ per kWh. Cents are divided by 100, as the records show."""
-    if economics.normalize_unit(elec.unit) == "CENTS/KWH":
-        return elec.value / 100
-    return elec.value
-
-
 def apply_money(bt: Backtest, ctx: dict, rounded: bool = True) -> None:
     """Fill revenue and cost on every season, and water cost per acre-ft per year.
 
+    Cost is economics.block_cost (inputs + harvest + water + irrigation system, scaled
+    by the NASS/EIA cost indexes to the year used); see that function for the formula.
     Displayed results (rounded=True) follow the steps a person can redo by hand:
         harvest tons = baseline tons/acre x relative yield / median x acres, to 0.01 ton
         sales        = harvest in the price unit x price, to $1
         water        = water applied to 0.0001 acre-ft, split by the surface share
-        cost         = production cost/acre x acres
-                       + surface acre-ft x surface $/acre-ft
-                       + groundwater acre-ft x lift ft x 1.02 kWh / pump efficiency x $/kWh
-                       (each part to $0.01), total to $1
+        cost         = block_cost parts to $0.01, total to $1
         margin       = sales - cost
+    The year used for prices and indexes is the latest year in cost_indexes.csv in
+    "current" price mode and the simulated year in "historical" mode.
     The optimizer prices 1-acre options with rounded=False so its per-acre values stay
     linear in acres; it then checks every plan against the rounded engine.
     """
     req = bt.request
-    crop_prices, utilities, defaults = _price_tables()
+    crop_prices, _, defaults = _price_tables()
+    indexes, _ = _cost_tables()
     mode = req.price_mode
     share = req.optional.surface_water_share
     ground = rnd(1 - share, 6)
@@ -616,23 +694,20 @@ def apply_money(bt: Backtest, ctx: dict, rounded: bool = True) -> None:
     notes: dict[str, None] = {}  # ordered set
     r = rnd if rounded else (lambda x, d=0: x)
 
+    used = {y: economics.year_used(mode, y, indexes) for y in bt.years}
     pump_cost: dict[int, float | None] = {}
-    elec_by_year: dict[int, economics.Price | None] = {}
     for y in bt.years:
-        elec = _lookup_price(utilities, ELECTRICITY_SERIES, y, mode, notes, "electricity")
-        elec_by_year[y] = elec
-        pump_cost[y] = (economics.pumping_cost_per_af(lift, pump_eff, elec.value, elec.unit)
-                        if elec else None)
+        elec = indexes.get("electricity", used[y])
+        pump_cost[y] = economics.pumping_cost_per_af(lift, pump_eff, elec.value)
         sw_part = share * sw_price if sw_price is not None else (0.0 if share == 0 else None)
-        gw_part = (1 - share) * pump_cost[y] if pump_cost[y] is not None else (
-            0.0 if share == 1 else None)
-        bt.water_cost_per_af[y] = (sw_part + gw_part
-                                   if sw_part is not None and gw_part is not None else None)
+        bt.water_cost_per_af[y] = sw_part + (1 - share) * pump_cost[y] if sw_part is not None else None
 
     for b in req.blocks:
         label = b.crop.replace("_", " ")
         base = ctx["baseline_yields"].get(b.crop)
-        prod = ctx["production_costs"].get(b.crop)
+        comps = cost_components(b.crop, ctx)
+        if comps is not None:
+            comps = with_irrigation_system(b.crop, comps, b.irrigation, ctx)
         relative = [round(bt.seasons[b.id][y].relative_yield, 3) for y in bt.years]
         typical = median(relative)
         missing: dict[str, None] = {}
@@ -644,16 +719,21 @@ def apply_money(bt: Backtest, ctx: dict, rounded: bool = True) -> None:
             missing["nonzero median modeled yield"] = None
         if base_tpa is None:
             missing["baseline yield"] = None
-        if prod is None:
+        if comps is None:
             missing["production cost"] = None
+        elif not any(c.basis == "per_acre_system" and c.component == economics.SYSTEM_COMPONENT.get(b.irrigation)
+                     for c in comps):
+            # Never a $0 system cost: this crop and irrigation combination has no cost data.
+            notes[f"Block {b.id} ({label}): {no_system_cost_reason(b.crop, b.irrigation)} Its revenue, "
+                  "cost, and profit are shown as no data."] = None
+            comps = None
         for y, s in bt.seasons[b.id].items():
             price = _lookup_price(crop_prices, b.crop, y, mode, notes, label)
-            elec = elec_by_year[y]
             if price is None:
                 missing["crop price"] = None
             if bt.water_cost_per_af[y] is None:
                 missing["water price"] = None
-            if price is None or base_tpa is None or prod is None or bt.water_cost_per_af[y] is None or not typical:
+            if price is None or base_tpa is None or comps is None or bt.water_cost_per_af[y] is None or not typical:
                 s.revenue = s.cost = s.money = None
                 continue
             tons = r(base_tpa * round(s.relative_yield, 3) / typical * b.acres, 2)
@@ -661,33 +741,43 @@ def apply_money(bt: Backtest, ctx: dict, rounded: bool = True) -> None:
             revenue_exact = qty * price.value
             water = r(s.water_applied_af, 4)
             sw_af, gw_af = r(water * share, 4), r(water * ground, 4)
-            production = r(prod["cost_excl_water"] * b.acres, 2)
-            surface = r(sw_af * sw_price, 2) if share > 0 else 0.0
-            kwh = kwh_price(elec) if share < 1 else None
-            groundwater = (r(gw_af * lift * economics.KWH_PER_AF_FT / pump_eff * kwh, 2)
-                           if share < 1 else 0.0)
-            cost_exact = production + surface + groundwater
+            cost = economics.block_cost(
+                economics.components_for_year(comps, used[y]), acres=b.acres, tons=tons, irrigation=b.irrigation,
+                surface_af=sw_af if share > 0 else 0.0, groundwater_af=gw_af if share < 1 else 0.0,
+                surface_price_per_af=sw_price, well_lift_ft=lift, pump_efficiency=pump_eff,
+                indexes=indexes, year=used[y], rounded=rounded)
+            for reason in cost.estimates:
+                notes[f"Cost estimate: {reason}."] = None
+            production = cost.inputs + cost.harvest + cost.irrigation_system
+            cost_exact = cost.inputs + cost.harvest + cost.water + cost.irrigation_system
             s.revenue = r(revenue_exact, 0)
             s.cost = r(cost_exact, 0)
             s.money = {"tons": tons, "qty": qty, "sale_unit": sale_unit, "price": price,
                        "revenue_exact": revenue_exact, "water": water, "sw_af": sw_af,
                        "gw_af": gw_af, "ground_share": ground, "production": production,
-                       "surface": surface, "groundwater": groundwater, "kwh": kwh, "elec": elec,
-                       "cost_exact": cost_exact, "typical": typical}
+                       "surface": cost.surface, "groundwater": cost.groundwater,
+                       "elec": cost.electricity, "kwh": cost.electricity.value if cost.electricity else None,
+                       "cost": cost, "year_used": used[y], "cost_exact": cost_exact, "typical": typical}
         if missing:
             notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
                   "cost, and profit are shown as no data."] = None
 
     notes["Revenue uses the same median-normalized harvest quantity as the harvest-weight display."] = None
+    latest = indexes.latest_year
     if mode == "current":
         notes["Prices: the latest USDA NASS price for each crop is used for every year."] = None
+        notes[f"Costs: every year uses {latest} input prices (UC Davis study costs scaled by USDA NASS "
+              f"prices-paid indexes and U.S. EIA diesel and electricity prices), so only the weather "
+              f"changes from year to year."] = None
     else:
         notes["Prices: each year uses that year's USDA NASS price."] = None
+        notes["Costs: each year's UC Davis study costs are scaled to that year by USDA NASS "
+              "prices-paid indexes and U.S. EIA diesel and electricity prices."] = None
     last = bt.years[-1]
     if sw_price is not None and pump_cost.get(last) is not None:
         notes[f"Applied water is {share:.0%} surface water at ${sw_price:,.0f} per acre-ft and "
               f"{1 - share:.0%} groundwater pumped from {lift:g} ft (about "
-              f"${pump_cost[last]:,.0f} per acre-ft in {last})."] = None
+              f"${pump_cost[last]:,.0f} per acre-ft at {used[last]} electricity prices)."] = None
     bt.money_notes = list(notes)
 
 

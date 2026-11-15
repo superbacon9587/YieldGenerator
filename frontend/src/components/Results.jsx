@@ -35,6 +35,7 @@ import {
   summaryMetrics,
   scenarioFarm,
   validateFarm,
+  irrigationsFor,
 } from "../domain.js";
 import { simulate } from "../api.js";
 import Timeline from "./Timeline.jsx";
@@ -225,7 +226,7 @@ export default function Results({ farm, result, mock, onBack }) {
         type === "water"
           ? "Water budget at 75% of baseline mean use"
           : type === "drip"
-            ? "All crop entries switched to drip"
+            ? "Crop entries with drip cost data switched to drip"
             : `Changed ${CROPS[change.crop]?.name ?? change.crop} scenario`,
       );
     } catch (e) {
@@ -464,6 +465,7 @@ export default function Results({ farm, result, mock, onBack }) {
                     <br />
                     (°C-days)
                   </th>
+                  <th>Cost</th>
                   <th>Profit</th>
                 </tr>
               </thead>
@@ -521,6 +523,10 @@ export default function Results({ farm, result, mock, onBack }) {
                         <CalcInfo id={`block.${b.id}.${year}.gdd`} />
                       </td>
                       <td>
+                        {money(r?.cost)}
+                        <CalcInfo id={`block.${b.id}.${year}.cost`} />
+                      </td>
+                      <td>
                         {money(r?.profit)}
                         <CalcInfo id={`block.${b.id}.${year}.profit`} />
                       </td>
@@ -562,12 +568,13 @@ export default function Results({ farm, result, mock, onBack }) {
               disabled={busy}
               onClick={() => compare("drip")}
             >
-              <Droplets size={15} /> Compare all-drip irrigation
+              <Droplets size={15} /> Compare drip irrigation (crops with drip cost data)
             </button>
           </div>
           <p className="caption">
             The water cut sets the budget to 75% of the baseline mean applied
-            water. Drip compatibility and installation costs are not assessed.
+            water. Drip compatibility and one-time conversion costs are not
+            assessed.
           </p>
           <details className="disclosure" open>
             <summary>
@@ -595,6 +602,9 @@ export default function Results({ farm, result, mock, onBack }) {
                     setChange({
                       ...change,
                       crop: e.target.value,
+                      irrigation: irrigationsFor(e.target.value).includes(change.irrigation)
+                        ? change.irrigation
+                        : (irrigationsFor(e.target.value)[0] ?? change.irrigation),
                       ...(CROPS[e.target.value]?.perennial
                         ? { start_month: 1, end_month: 12 }
                         : {}),
@@ -628,9 +638,9 @@ export default function Results({ farm, result, mock, onBack }) {
                     setChange({ ...change, irrigation: e.target.value })
                   }
                 >
-                  {Object.entries(IRRIGATION).map(([key, name]) => (
+                  {irrigationsFor(change.crop).map((key) => (
                     <option key={key} value={key}>
-                      {name}
+                      {IRRIGATION[key]}
                     </option>
                   ))}
                 </select>

@@ -363,6 +363,9 @@ class MetaResponse(BaseModel):
     first_year: int
     last_full_year: int
     presets: list[int]
+    irrigation_by_crop: dict[str, list[Irrigation]] = Field(
+        default_factory=dict,
+        description="Irrigation types with cost data for each crop; other combinations are not offered")
 
 
 # ---------------------------------------------------------------- optimize (Part C, iteration 2)
@@ -403,6 +406,10 @@ class OptimizeRequest(_Strict):
     max_share_per_crop: float = Field(default=0.7, gt=0, le=1)
     min_block_acres: float = Field(default=5, ge=0)
     soil: Soil = "loam"
+    surface_water_share: float = Field(
+        default=0.5, ge=0, le=1,
+        description="Fraction of applied water from surface water; the rest is groundwater "
+                    "(same as /api/simulate optional.surface_water_share).")
     current_farm: CurrentFarmIn | None = None
 
     @field_validator("years")

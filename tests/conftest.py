@@ -68,3 +68,21 @@ def fake_location_context(monkeypatch):
     """Keep every test off the Census geocoder; tests can still pass context= directly."""
     from backend import simulate
     monkeypatch.setattr(simulate, "get_location_context", lambda lat, lon: make_context())
+
+
+def real_merced_weather():
+    """Real NASA POWER weather for the Merced grid cell, 2013-2017 (tests/fixtures), built
+    exactly as simulate.load_weather builds it. 2014 was a drought year, 2017 a wet one."""
+    import json
+    from pathlib import Path
+    import pandas as pd
+    from backend.et0 import et0_fao56
+
+    path = Path(__file__).parent / "fixtures" / "power_merced_2013_2017.csv"
+    attrs = json.loads(next(l for l in path.read_text().splitlines() if l.startswith("# attrs: "))[9:])
+    df = pd.read_csv(path, comment="#", index_col="date", parse_dates=True)
+    df.attrs = attrs
+    out = pd.DataFrame({"tmax_c": df["tmax_c"], "tmin_c": df["tmin_c"],
+                        "precip_mm_day": df["precip_mm_day"], "et0_mm_day": et0_fao56(df)})
+    out.attrs = {"lat": attrs["lat"], "lon": attrs["lon"], "elevation_m": attrs.get("elevation_m")}
+    return out

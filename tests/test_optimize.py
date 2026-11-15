@@ -26,13 +26,29 @@ ALMONDS_40 = {"blocks": [
     {"id": "a", "crop": "almonds", "acres": 40, "irrigation": "drip", "start_month": 1, "end_month": 12}]}
 
 
+# Real UC Davis study values; prices are the NASS prices in crop_prices.csv.
+TOMATO_YIELD = {"value": 58.0, "unit": "TONS / ACRE", "basis": "county",
+                "source": "UC Davis processing tomato study, San Joaquin Valley South 2018, p. 14 (58 tons/acre)"}
+TOMATO_COST = {"cost_excl_water": 2710.0, "unit": "$ / ACRE", "region": "San Joaquin Valley South",
+               "source": "tomatoes_processing_sjv_south_2018.pdf p. 14"}
+ALMOND_YIELD = {"value": 2200.0, "unit": "LB / ACRE", "basis": "county",
+                "source": "UC Davis almond study, Sacramento Valley 2024, p. 19 (2,200 lb/acre)"}
+ALMOND_COST = {"cost_excl_water": 3083.0, "unit": "$ / ACRE", "region": "Sacramento Valley",
+               "source": "almonds_sacramento_valley_2024.pdf p. 19"}
+CORN_BU = 230.0  # realistic California corn grain yield, bu/acre
+
+
 def profitable_context():
-    """Corn and oats both make money (the default test context has corn losing money
-    and oats without a production cost)."""
+    """Processing tomatoes and almonds make money at their UC Davis study yields and NASS
+    prices; corn at a realistic 230 bu/acre and its NASS price does not (see
+    test_corn_at_realistic_yield_loses_money). Oats are costed from USDA ERS national
+    averages (no UC Davis oats study), on flood only."""
     ctx = make_context()
-    ctx["baseline_yields"]["corn"]["value"] = 300.0
-    ctx["production_costs"]["oats"] = {"cost_excl_water": 250.0, "unit": "$ / ACRE",
-                                       "region": "test", "source": "test"}
+    ctx["baseline_yields"]["corn"]["value"] = CORN_BU
+    ctx["baseline_yields"]["processing_tomatoes"] = dict(TOMATO_YIELD)
+    ctx["production_costs"]["processing_tomatoes"] = dict(TOMATO_COST)
+    ctx["baseline_yields"]["almonds"] = dict(ALMOND_YIELD)
+    ctx["production_costs"]["almonds"] = dict(ALMOND_COST)
     return ctx
 
 
@@ -92,9 +108,14 @@ def test_options_and_wrapping_windows():
         n = opt.season_months(crop)
         assert abs(n * opt.DAYS_PER_MONTH - reference.season_days(crop)) <= opt.DAYS_PER_MONTH / 2
     r = run(allow_new_perennials=True)
-    # 4 irrigation types x almonds and walnuts, 16 corn, 16 oats (tomatoes and alfalfa
-    # have no money data in the test context).
-    assert r.options_considered == 4 * 2 + 16 + 16
+    # Only irrigation types with cost data: almonds (drip, micro-sprinkler) and walnuts
+    # (micro-sprinkler, flood) 2 each; tomatoes drip x 3 windows; corn and oats flood x 4
+    # windows each (alfalfa has no money data in the test context).
+    assert r.options_considered == 2 + 2 + 3 + 4 + 4
+    assert {"processing tomato on micro-sprinkler", "almond on flood", "corn on drip",
+            "oat on sprinkler"} <= set(opt.build_problem(request(allow_new_perennials=True),
+                                                         engine.prepare_weather(WX),
+                                                         clean_ctx(profitable_context())).no_cost_excluded)
 
 
 def test_per_acre_results_come_from_the_engine_and_are_cached(monkeypatch):
@@ -103,14 +124,14 @@ def test_per_acre_results_come_from_the_engine_and_are_cached(monkeypatch):
     req = request()
     opt._CACHE.clear()
     problem = opt.build_problem(req, wx, ctx)
-    corn = next(o for o in problem.options if o.key == opt.OptionKey("corn", "drip", 6, 10))
-    one = single_block(ctx, "corn", "drip", 6, 10, acres=1.0)
+    tom = next(o for o in problem.options if o.key == opt.OptionKey("processing_tomatoes", "drip", 5, 9))
+    one = single_block(ctx, "processing_tomatoes", "drip", 5, 9, acres=1.0)
     yearly = one.blocks[0].yearly
-    assert corn.months == (6, 7, 8, 9, 10)
-    np.testing.assert_allclose(corn.relative_yield, [y.relative_yield for y in yearly], atol=5e-4)
-    np.testing.assert_allclose(corn.water, [y.water_applied_af for y in yearly], atol=0.05)
-    np.testing.assert_allclose(corn.cost, [y.cost for y in yearly], atol=0.5)
-    np.testing.assert_allclose(corn.tons, [y.tons_per_acre for y in one.yield_weight[0].yearly], atol=5e-4)
+    assert tom.months == (5, 6, 7, 8, 9)
+    np.testing.assert_allclose(tom.relative_yield, [y.relative_yield for y in yearly], atol=5e-4)
+    np.testing.assert_allclose(tom.water, [y.water_applied_af for y in yearly], atol=0.05)
+    np.testing.assert_allclose(tom.cost, [y.cost for y in yearly], atol=0.5)
+    np.testing.assert_allclose(tom.tons, [y.tons_per_acre for y in one.yield_weight[0].yearly], atol=5e-4)
     calls = []
     real = engine.run_backtest
     monkeypatch.setattr(engine, "run_backtest", lambda *a, **k: calls.append(1) or real(*a, **k))
@@ -121,13 +142,14 @@ def test_per_acre_results_come_from_the_engine_and_are_cached(monkeypatch):
 # ---------------------------------------------------------------- optimality
 
 def tiny_case(monkeypatch, **overrides):
-    """2 crops x 2 irrigation types x 2 start months = 8 options on 20 acres."""
+    """2 crops x 2 start months = 4 options on 20 acres: tomatoes have cost data only for
+    drip and oats only for flood, so each crop has one of the two allowed types."""
     entries = deepcopy(reference.crops())
-    entries["corn"]["planting_months"]["value"] = [4, 6]
+    entries["processing_tomatoes"]["planting_months"]["value"] = [3, 5]
     entries["oats"]["planting_months"]["value"] = [10, 11]
     monkeypatch.setattr(reference, "crops", lambda: entries)
     opt._CACHE.clear()
-    body = dict(allowed_crops=["corn", "oats"], allowed_irrigation=["drip", "flood"],
+    body = dict(allowed_crops=["processing_tomatoes", "oats"], allowed_irrigation=["drip", "flood"],
                 available_acres=20, max_share_per_crop=1, min_block_acres=5)
     body.update(overrides)
     req = request(**body)
@@ -166,22 +188,22 @@ def brute_force(problem, objective):
 ])
 def test_milp_beats_or_matches_brute_force(monkeypatch, objective, limits):
     _, problem = tiny_case(monkeypatch, objective=objective, **limits)
-    assert len(problem.options) == 8
+    assert len(problem.options) == 4
     sol = opt.solve(problem, objective)
     assert sol.status == "optimal"
     best = brute_force(problem, objective)
     assert sol.objective_value >= best - 1e-6 * max(1.0, abs(best))
 
 
-def test_profit_plan_is_best_single_corn_option():
-    """Every corn window covers Jun and Jul, so with share 1 and a loose budget the best
-    plan is all the land in the corn option with the highest profit per acre."""
+def test_profit_plan_is_best_single_tomato_option():
+    """Every tomato window covers Jun and Jul, so with share 1 and a loose budget the best
+    plan is all the land in the tomato option with the highest profit per acre."""
     ctx = profitable_context()
-    singles = {(irr, s, e): single_block(ctx, "corn", irr, s, e)
-               for s, e in opt.planting_windows("corn")
-               for irr in ("drip", "micro_sprinkler", "sprinkler", "flood")}
+    singles = {(irr, s, e): single_block(ctx, "processing_tomatoes", irr, s, e)
+               for s, e in opt.planting_windows("processing_tomatoes")
+               for irr in engine.irrigation_by_crop()["processing_tomatoes"]}
     best_key = max(singles, key=lambda k: singles[k].summary_stats.avg_profit)
-    r = run(ctx, allowed_crops=["corn"], max_share_per_crop=1, budget_usd=10_000_000)
+    r = run(ctx, allowed_crops=["processing_tomatoes"], max_share_per_crop=1, budget_usd=10_000_000)
     assert [(b.irrigation, b.start_month, b.end_month, b.acres) for b in r.plan.blocks] == [(*best_key, 100.0)]
     assert r.plan.summary_stats == singles[best_key].summary_stats
     assert any(s.startswith("Land is fully used") for s in r.binding_constraints)
@@ -190,12 +212,12 @@ def test_profit_plan_is_best_single_corn_option():
 def test_profit_per_af_matches_best_single_option_ratio():
     """A mix never beats the best single option's profit per acre-foot (mediant rule)."""
     ctx = profitable_context()
-    singles = {(irr, s, e): single_block(ctx, "corn", irr, s, e).summary_stats
-               for s, e in opt.planting_windows("corn")
-               for irr in ("drip", "micro_sprinkler", "sprinkler", "flood")}
+    singles = {(irr, s, e): single_block(ctx, "processing_tomatoes", irr, s, e).summary_stats
+               for s, e in opt.planting_windows("processing_tomatoes")
+               for irr in engine.irrigation_by_crop()["processing_tomatoes"]}
     ratio = {k: s.avg_profit / s.avg_water_applied_af for k, s in singles.items()}
     best_key = max(ratio, key=ratio.get)
-    r = run(ctx, objective="profit_per_af", allowed_crops=["corn"])
+    r = run(ctx, objective="profit_per_af", allowed_crops=["processing_tomatoes"], budget_usd=10_000_000)
     (block,) = r.plan.blocks
     assert (block.irrigation, block.start_month, block.end_month) == best_key
     assert block.acres == 70.0  # the most profit at that ratio: the 70% share limit
@@ -239,11 +261,11 @@ def test_production_value_uses_current_prices_in_any_price_mode():
 # ---------------------------------------------------------------- land
 
 def test_winter_and_summer_annuals_share_acres():
-    r = run(max_share_per_crop=1)
+    r = run(max_share_per_crop=1, budget_usd=10_000_000)
     by_crop = {}
     for b in r.plan.blocks:
         by_crop[b.crop] = by_crop.get(b.crop, 0) + b.acres
-    assert by_crop == {"corn": 100.0, "oats": 100.0}
+    assert by_crop == {"processing_tomatoes": 100.0, "oats": 100.0}
     assert max(monthly_acres(r.plan.blocks)) <= 100 + 1e-9
     assert r.plan.land.over_capacity_months == []
     assert any(s.startswith("Land is fully used") for s in r.binding_constraints)
@@ -262,7 +284,7 @@ def test_land_never_exceeded_in_any_month():
 
 def test_every_year_budget_holds_and_average_can_go_over():
     ctx, wx = profitable_context(), varied_weather()
-    common = dict(allowed_crops=["corn"], allowed_irrigation=["flood"], max_share_per_crop=1,
+    common = dict(allowed_crops=["processing_tomatoes"], allowed_irrigation=["drip"], max_share_per_crop=1,
                   budget_usd=40_000)
     every = run(ctx, wx, **common)
     average = run(ctx, wx, budget_rule="average", **common)
@@ -290,14 +312,17 @@ def test_water_limit_holds_every_year():
 
 
 def test_min_block_reshapes_a_small_leftover_block():
-    common = dict(budget_usd=17_100, max_share_per_crop=0.15)
+    # Two profitable crops at their study values; the budget leaves a small almond block
+    # beside the capped tomato acres when blocks can be tiny.
+    common = dict(budget_usd=65_000, max_share_per_crop=0.15, allow_new_perennials=True,
+                  allowed_crops=["processing_tomatoes", "almonds"])
     loose = run(min_block_acres=0, **common)
     assert min(b.acres for b in loose.plan.blocks) < 5
     strict = run(min_block_acres=5, **common)
     assert all(b.acres >= 5 for b in strict.plan.blocks)
-    assert {b.crop for b in strict.plan.blocks} == {"corn", "oats"}
-    corn_only = run(min_block_acres=5, allowed_crops=["corn"], **common)
-    assert strict.plan.summary_stats.avg_profit > corn_only.plan.summary_stats.avg_profit
+    assert {b.crop for b in strict.plan.blocks} == {"processing_tomatoes", "almonds"}
+    tomatoes_only = run(min_block_acres=5, **{**common, "allowed_crops": ["processing_tomatoes"]})
+    assert strict.plan.summary_stats.avg_profit > tomatoes_only.plan.summary_stats.avg_profit
 
 
 # ---------------------------------------------------------------- perennials
@@ -326,7 +351,9 @@ def test_locked_perennial_is_kept_even_when_it_loses_money():
 
 
 def test_new_perennials_allowed():
-    r = run(allow_new_perennials=True, max_share_per_crop=1, budget_usd=10_000_000)
+    # Tomatoes earn more per acre, so the share limit leaves room for almonds.
+    r = run(allow_new_perennials=True, max_share_per_crop=0.5, budget_usd=10_000_000,
+            allowed_crops=["processing_tomatoes", "almonds"])
     assert any(b.crop == "almonds" for b in r.plan.blocks)
     assert opt.PERENNIAL_LAG_NOTE in r.assumptions
 
@@ -418,7 +445,7 @@ def test_block_averages_and_difference_vs_current():
 
 
 def test_alternatives_use_different_option_sets():
-    r = run(objective="profit_per_af", allowed_crops=["corn"])
+    r = run(objective="profit_per_af", allowed_crops=["processing_tomatoes"])
     assert 1 <= len(r.alternatives) <= 3
     assert [a.label for a in r.alternatives] == [f"Alternative {i + 1}" for i in range(len(r.alternatives))]
     sets = [frozenset((b.crop, b.irrigation, b.start_month) for b in r.plan.blocks)]
@@ -426,6 +453,19 @@ def test_alternatives_use_different_option_sets():
     assert len(sets) == len(set(sets))
     for a in r.alternatives:
         assert a.budget.years_over_budget == []
+
+
+def test_corn_at_realistic_yield_loses_money():
+    """Corn at 230 bu/acre and its NASS price, costed from the UC Davis study scaled to
+    today's input prices, has a negative margin: the app reports real economics, and
+    the optimizer leaves corn out of a profit plan."""
+    ctx = profitable_context()
+    assert ctx["baseline_yields"]["corn"]["value"] == CORN_BU == 230.0
+    sim = single_block(ctx, "corn", "flood", 4, 8)  # corn has cost data for flood only
+    assert all(y.profit < 0 for y in sim.blocks[0].yearly)
+    assert sim.summary_stats.avg_profit < 0
+    r = run(ctx, allowed_crops=["corn"])
+    assert r.status == "no_profitable_plan" and r.plan is None
 
 
 def test_no_advice_language():
@@ -462,8 +502,38 @@ def test_no_profitable_plan():
 
 
 def test_missing_money_data_excludes_crop_with_note():
-    r = run(make_context())
-    assert any("Oats was left out" in a and "production cost" in a for a in r.assumptions)
+    r = run(make_context())  # the default test context has no tomato baseline yield
+    assert any("Processing tomatoes was left out" in a and "baseline yield" in a for a in r.assumptions)
+
+
+def test_unpriced_irrigation_systems_are_excluded_and_no_option_has_a_zero_system_cost():
+    """Crop and irrigation combinations no UC Davis study prices are not options, and every
+    option's irrigation system cost is above $0 (except oats, whose USDA ERS average has no
+    separate system line)."""
+    ctx = profitable_context()
+    req = request(allow_new_perennials=True)
+    problem = opt.build_problem(req, engine.prepare_weather(WX), clean_ctx(ctx))
+    keys = {o.key for o in problem.options}
+    assert not any(k.crop == "processing_tomatoes" and k.irrigation == "micro_sprinkler" for k in keys)
+    assert "processing tomato on micro-sprinkler" in problem.no_cost_excluded
+    r = run(ctx, allow_new_perennials=True)
+    note = next(a for a in r.assumptions if a.startswith("Excluded, no cost data for this irrigation system"))
+    assert "processing tomato on micro-sprinkler" in note
+    for o in problem.options:
+        sim = SimulateRequest.model_validate({
+            "location": LOCATION, "years": list(YEARS),
+            "blocks": [{"id": "b", "crop": o.crop, "acres": 1.0, "irrigation": o.key.irrigation,
+                        "start_month": o.key.start_month, "end_month": o.key.end_month}]})
+        bt = engine.run_backtest(sim, WX)
+        bt.context = clean_ctx(ctx)
+        engine.apply_money(bt, bt.context)
+        for s in bt.seasons["b"].values():
+            cost = s.money["cost"]
+            assert cost.system is not None, o.key
+            if cost.system.component.source.startswith("USDA ERS"):
+                assert o.crop == "oats" and cost.irrigation_system == 0
+            else:
+                assert cost.irrigation_system > 0, o.key
 
 
 # ---------------------------------------------------------------- API

@@ -9,8 +9,9 @@ from conftest import make_weather
 from test_simulate import block, request
 
 
-def farm(irrigation="drip", acres=10, **optional):
-    return request([block("b1", crop="corn", acres=acres, irrigation=irrigation)],
+def farm(irrigation="flood", acres=10, crop="corn", **optional):
+    months = {"start": 1, "end": 12} if crop in ("almonds", "walnuts") else {}
+    return request([block("b1", crop=crop, acres=acres, irrigation=irrigation, **months)],
                    **optional).model_dump()
 
 
@@ -33,14 +34,15 @@ def test_rank_lower_first_for_water():
 # ---------------------------------------------------------------- endpoint
 
 def test_compare_ranks_by_profit_by_default(client):
-    body = {"configs": [{"name": "Flood corn", "farm": farm("flood")},
-                        {"name": "Drip corn", "farm": farm("drip")}]}
+    # Walnuts have cost data for micro-sprinkler and flood irrigation.
+    body = {"configs": [{"name": "Flood walnuts", "farm": farm("flood", crop="walnuts")},
+                        {"name": "Micro walnuts", "farm": farm("micro_sprinkler", crop="walnuts")}]}
     r = client.post("/api/compare", json=body)
     assert r.status_code == 200, r.text
     data = r.json()
     assert data["ranked_by"] == "avg_profit"
-    names = [x["name"] for x in data["results"]]
-    assert names == ["Drip corn", "Flood corn"]  # drip pays less for water
+    profits = [x["summary_stats"]["avg_profit"] for x in data["results"]]
+    assert None not in profits and profits == sorted(profits, reverse=True)
     assert [x["rank"] for x in data["results"]] == [1, 2]
     for x in data["results"]:
         assert set(x) == {"name", "summary_stats", "budget", "rank", "calculations"}
@@ -106,7 +108,10 @@ def test_meta(client, monkeypatch):
     import datetime as dt
     monkeypatch.setattr(power_client, "default_end_date", lambda today=None: dt.date(2025, 12, 31))
     data = client.get("/api/meta").json()
-    assert data == {"first_year": 1985, "last_full_year": 2025, "presets": [5, 10, 20, 30, 40]}
+    assert data == {"first_year": 1985, "last_full_year": 2025, "presets": [5, 10, 20, 30, 40],
+                    "irrigation_by_crop": sim.irrigation_by_crop()}
+    assert data["irrigation_by_crop"]["processing_tomatoes"] == ["drip"]
+    assert data["irrigation_by_crop"]["oats"] == ["flood"]
 
 
 def test_meta_drops_presets_longer_than_history(client, monkeypatch):

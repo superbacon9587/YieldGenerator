@@ -2,12 +2,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Info, Printer, X } from "lucide-react";
 import { useYieldUnit } from "../yield/YieldUnitContext.jsx";
-import {
-  formatRecordValue,
-  inWeightUnit,
-  isEstimated,
-  sourceParts,
-} from "./calcRecords.js";
+import { formatRecordValue, inWeightUnit, isEstimated, sourceParts, costParts } from "./calcRecords.js";
 import "./provenance.css";
 
 // The calculation records of the response shown on this part of the page.
@@ -42,6 +37,29 @@ function InputSource({ input }) {
         </span>
       )}
     </>
+  );
+}
+
+/** The four cost parts, each with the step that computes it below. */
+function CostParts({ record }) {
+  const parts = costParts(record);
+  if (!parts) return null;
+  return (
+    <table className="calc-parts">
+      <caption>{parts.formula}</caption>
+      <tbody>
+        {parts.rows.map((r) => (
+          <tr key={r.name}>
+            <th scope="row">{r.name}</th>
+            <td>{r.text}</td>
+          </tr>
+        ))}
+        <tr className="calc-parts-total">
+          <th scope="row">Cost (sum, to $1)</th>
+          <td>{parts.sumText}</td>
+        </tr>
+      </tbody>
+    </table>
   );
 }
 
@@ -90,6 +108,7 @@ function Popover({ record, display, close }) {
         </div>
       </header>
       <p className="calc-formula">{record.formula_text}</p>
+      <CostParts record={record} />
       <ol className="calc-steps">
         {record.steps.map((s, i) => (
           <li key={i}>{s.text}</li>

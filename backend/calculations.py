@@ -27,15 +27,28 @@ def matching_price(path, key, name, price):
         return []
     return [r for r in records(path) if r[key] == name and int(r["year"]) == price.year]
 
+def cost_breakdown(cost):
+    """economics.BlockCost as plain numbers for the audit."""
+    if cost is None:
+        return None
+    line = lambda ln: {"component": ln.component.component, "basis": ln.component.basis, "amount": ln.component.amount,
+                       "base_year": ln.component.base_year, "index_name": ln.component.index_name, "ratio": ln.ratio,
+                       "region": ln.component.region, "source": ln.component.source, "source_url": ln.component.source_url}
+    return {"year_used": cost.year_used, "inputs_per_acre": cost.inputs_per_acre, "inputs": cost.inputs,
+            "harvest": cost.harvest, "irrigation_system": cost.irrigation_system, "surface_water": cost.surface,
+            "groundwater": cost.groundwater, "weighted_ratio": cost.weighted_ratio,
+            "lines": [line(ln) for ln in cost.lines], "system": line(cost.system) if cost.system else None,
+            "estimates": cost.estimates}
+
+
 def build(bt, response, wx):
     from backend import simulate as engine
     req, ctx = bt.request, bt.context
-    prices, utilities, defaults = engine._price_tables()
+    prices, _, defaults = engine._price_tables()
     blocks = []
     prepared = engine.prepare_weather(wx)
     for b, out in zip(req.blocks, response.blocks):
         base = ctx["baseline_yields"].get(b.crop)
-        cost = ctx["production_costs"].get(b.crop)
         typical = median(r.relative_yield for r in out.yearly)
         params = reference.crop_params(b.crop)
         normal = engine.normal_heat_days(b, prepared)
@@ -44,26 +57,23 @@ def build(bt, response, wx):
         yield_rows = [r for r in records(path) if r["crop"] == b.crop and (base is None or base["basis"] != "county" or r.get("county") == ctx["county"])] if base else []
         if yield_rows and base and round(median(float(r["yield"]) for r in yield_rows), 3) != base["value"]:
             yield_rows = []  # injected/custom context has no matching committed extract
-        cost_rows = [r for r in records("data/reference/prices/production_costs.csv") if r["crop"] == b.crop and cost and r["region"] == cost["region"] and r["cost_excl_water"] and float(r["cost_excl_water"]) == cost["cost_excl_water"]]
+        comps = engine.cost_components(b.crop, ctx) or []
+        cost_rows = [{k: v for k, v in vars(c).items()} for c in comps if c.basis != "excluded"]
         cost_warnings = []
-        for record in cost_rows:
-            filename_year = re.search(r"(20[0-9]{2})\.pdf", record["source"])
-            if filename_year and filename_year.group(1) != record["study_year"]:
-                cost_warnings.append(f"Cost record study_year is {record['study_year']} but its cited filename contains {filename_year.group(1)}. This source metadata has not been reconciled; treat this cost as provisional.")
         if yield_rows and max(int(record["year"]) for record in yield_rows) > req.years[1]:
             cost_warnings.append("The baseline yield extract includes reference years after this backtest ends. This is a retrospective scenario using later reference data, not an out-of-sample historical prediction.")
-        block_sources = [source("USDA NASS Quick Stats yield records used for the baseline", "nass", yield_rows), source("UC Davis Cost and Return Study record used for production cost", "ucd", cost_rows), source("FAO-56 crop coefficients and FAO-66 yield response factors, with verification flags", "fao56", [reference.get_crop(b.crop)]), source("Water and pump default assumptions (not measured)", None, [defaults]), source("Irrigation efficiencies (FAO Training Manual No. 4, placeholders to be checked)", "fao_tm4")]
+        block_sources = [source("USDA NASS Quick Stats yield records used for the baseline", "nass", yield_rows), {"label": "Cost components used (UC Davis cost study lines, or USDA ERS averages for crops with no California study)", "url": next((c.source_url for c in comps if c.source_url), None), "records": cost_rows}, source("FAO-56 crop coefficients and FAO-66 yield response factors, with verification flags", "fao56", [reference.get_crop(b.crop)]), source("Water and pump default assumptions (not measured)", None, [defaults]), source("Irrigation efficiencies (FAO Training Manual No. 4, placeholders to be checked)", "fao_tm4")]
         yearly = []
         for row in out.yearly:
             s = bt.seasons[b.id][row.year]
             price = engine._lookup_price(prices, b.crop, row.year, req.price_mode, {}, b.crop)
-            electricity = engine._lookup_price(utilities, engine.ELECTRICITY_SERIES, row.year, req.price_mode, {}, "electricity")
+            electricity = (s.money or {}).get("elec")
             active = s.active
             etc, eta = float(s.balance.etc[active].sum()), float(s.balance.eta[active].sum())
             heat_penalty = min(max(s.heat_stress_days-normal, 0)*engine.HEAT_PENALTY_PER_DAY, engine.HEAT_PENALTY_MAX)
             harvest_tpa = base_tons * row.relative_yield / typical if base_tons is not None and typical else None
             m = s.money or {}
-            water_cost = m["surface"] + m["groundwater"] if m else None
+            water_cost = m["cost"].water if m else None
             production_cost = m.get("production")
             query = {"parameters": ",".join(power_client.PARAMETERS), "community": "AG", "latitude": bt.grid_cell[0], "longitude": bt.grid_cell[1], "start": s.start.strftime("%Y%m%d"), "end": s.end.strftime("%Y%m%d"), "format": "JSON"}
             climate = wx.loc[str(s.start):str(s.end)]
@@ -76,12 +86,14 @@ def build(bt, response, wx):
                 "sale_quantity": m.get("qty"),
                 "revenue_unrounded": m.get("revenue_exact"), "cost_unrounded": m.get("cost_exact"),
                 "profit_unrounded": m["revenue_exact"] - m["cost_exact"] if m else None,
-                "production_cost_excl_water": production_cost, "production_cost_per_acre": cost["cost_excl_water"] if cost else None,
-                "production_cost_source": cost, "source_warnings": cost_warnings, "water_cost": water_cost,
+                "production_cost_excl_water": production_cost,
+                "cost_study": {"region": comps[0].region, "base_year": comps[0].base_year, "source_url": comps[0].source_url} if comps else None,
+                "source_warnings": cost_warnings, "water_cost": water_cost,
                 "applied_water_unrounded_af": s.water_applied_af, "blended_water_price_per_af": bt.water_cost_per_af[row.year],
                 "surface_share": req.optional.surface_water_share, "surface_price_per_af": ctx.get("surface_water_price_per_af"),
                 "pump_lift_ft": defaults["well_lift_ft"], "pump_efficiency": defaults["pump_efficiency"],
-                "electricity_dollars_per_kwh": economics.electricity_to_dollars_per_kwh(electricity.value, electricity.unit) if electricity else None,
+                "electricity_dollars_per_kwh": electricity.value if electricity else None,
+                "year_used": m.get("year_used"), "cost_breakdown": cost_breakdown(m.get("cost")),
                 "net_irrigation_applied_mm": s.applied_net_mm, "irrigation_efficiency": s.efficiency,
                 "etc_active_mm": etc, "eta_active_mm": eta, "etc_all_mm": float(s.balance.etc.sum()), "effective_rain_mm": float(s.balance.rain_eff.sum()),
                 "ky": params["ky"], "heat_threshold_c": params["heat_stress_c"], "normal_heat_days": normal,
@@ -90,7 +102,7 @@ def build(bt, response, wx):
                 "weather_processing": {"missing_before_fill": {k: int(climate[k].isna().sum()) for k in engine.WEATHER_COLUMNS}, "rule": "Temperature and ET0 gaps are interpolated; missing rain is filled with zero. ET0 is clipped to zero or above."},
                 "weather_source": {"label": f"NASA POWER daily input request: {s.start} to {s.end}", "url": power_client.API_URL+"?"+urlencode(query)},
                 "price_source": source("USDA NASS Quick Stats price record actually used", "nass", matching_price("data/reference/prices/crop_prices.csv", "crop", b.crop, price)),
-                "electricity_source": source("U.S. EIA electricity price record actually used", "eia", matching_price("data/reference/prices/utilities.csv", "type", engine.ELECTRICITY_SERIES, electricity))})
+                "electricity_source": source("U.S. EIA electricity price record actually used", "eia", [r for r in records(sources.COST_INDEXES) if electricity and r["index_name"] == "electricity" and int(r["year"]) == electricity.year])})
         blocks.append({"id": b.id, "crop": b.crop, "acres": b.acres, "sources": block_sources, "yearly": yearly})
     totals = response.farm_totals
     financial = [r for r in totals if r.profit is not None]
@@ -245,6 +257,7 @@ class Record:
         self.id, self.label, self.unit, self.decimals = rid, label, unit, decimals
         self.formula, self.rounding = formula, rounding
         self.steps, self.inputs = [], []
+        self.parts = None  # cost records: [{name, value, step}] for the four cost parts
 
     def inp(self, name, value, unit, src, kind="reference", estimate=None, why_not=None, money=False):
         src = src if isinstance(src, Src) else Src(src)
@@ -275,6 +288,8 @@ class Record:
                "steps": self.steps, "inputs": self.inputs}
         if lb is not None:
             rec["lb"] = lb
+        if self.parts is not None:
+            rec["parts"] = self.parts
         return rec
 
 
@@ -650,6 +665,7 @@ def block_year_records(bt, response, wx):
 
             if r.profit is not None and s.money:
                 out[f"{key}.profit"] = profit_record(f"{key}.profit", b, r, s, bt, name, typical, season)
+                out[f"{key}.cost"] = cost_record(f"{key}.cost", b, r, s, bt, name, season)
     return out
 
 
@@ -657,11 +673,10 @@ def profit_record(rid, b, r, s, bt, name, typical, season):
     from backend import simulate as engine
     req, ctx = bt.request, bt.context
     m = s.money
-    defaults = engine._price_tables()[2]
     price = m["price"]
     rec = Record(rid, f"Estimated margin, {name}, {r.year}", "$", 0,
-                 "Sales (harvest x price) - cost (production + surface water + groundwater pumping)",
-                 "Harvest to 0.01 ton, acre-ft to 0.0001, cost parts to $0.01, sales and cost to $1.")
+                 "Sales (harvest x price) - cost, where cost = inputs + harvest + water + irrigation system",
+                 COST_ROUNDING + " Sales to $1.")
     text, ops, expr = harvest_ops(rec, b, r.relative_yield, typical, ctx, req.blocks, True, season)
     tons = rec.step("Harvest: " + text, ops, expr, "tons", 2)
     filled = req.price_mode == "historical" and price.year != r.year
@@ -680,62 +695,235 @@ def profit_record(rid, b, r, s, bt, name, typical, season):
         sales = rec.step(f"Sales: {{0}} tons x {{1}} lb/ton / {{2}} lb/{sale} x {{3}} per {sale}",
                          [tons, lb_per_ton(rec), w, p], "{0}*{1}/{2}*{3}", round_to=0, money=True)
 
-    cost = ctx["production_costs"][b.crop]
-    warn = ""
-    for record in records("data/reference/prices/production_costs.csv"):
-        mm = re.search(r"(20[0-9]{2})\.pdf", record["source"])
-        if (record["crop"] == b.crop and record["region"] == cost["region"] and mm
-                and mm.group(1) != record["study_year"] and record["cost_excl_water"]
-                and float(record["cost_excl_water"]) == cost["cost_excl_water"]):
-            warn = f"; study year {record['study_year']} differs from the {mm.group(1)} in the file name"
-    away = (f"; nearest region with a study ({cost['region']})"
-            if ctx.get("cost_region") and ctx["cost_region"] != cost["region"] else "")
-    pc = rec.inp("Production cost excluding water", cost["cost_excl_water"], "$/acre", sources.cost(b.crop, ctx),
-                 "reference",
-                 "Regional reference budget from a UC Davis cost study, not this farm's expenses" + away + warn, money=True)
+    total = full_cost_steps(rec, b, s, bt, season, tons)
+    rec.step("Margin: sales {0} - cost {1}", [sales, total], "{0}-{1}", money=True)
+    return rec.out(r.profit)
+
+
+COMPONENT_LABELS = {"seed": "Seed", "fertilizer": "Fertilizer", "chemicals": "Chemicals", "labor": "Labor",
+                    "machinery_fuel": "Machinery and fuel", "harvest_haul": "Harvest and haul", "other": "Other inputs"}
+INDEX_LABELS = {"seeds": "NASS seeds index", "fertilizer": "NASS fertilizer index", "chemicals": "NASS chemicals index",
+                "wages": "NASS wage rate index", "fuels": "NASS fuels index", "diesel": "EIA diesel price"}
+INDEX_UNITS = {"diesel": "$/gal"}
+
+
+UCD_REASON = "Typical practice amounts from the UC Davis cost study, not this farm's actual records"
+COST_FORMULA = "Cost = inputs + harvest + water + irrigation system"
+COST_ROUNDING = ("Harvest to 0.01 ton, index ratios to 0.000001, acre-ft to 0.0001, each cost part to $0.01, "
+                 "cost to $1.")
+COST_PART_NAMES = ("Inputs", "Harvest", "Water", "Irrigation system")
+
+
+def cost_steps(rec, b, ctx, m, tons):
+    """Steps for economics.block_cost: index ratios, then the inputs, harvest and irrigation
+    system parts. Returns {"inputs", "harvest", "system"} steps; water is added by
+    full_cost_steps. Mirrors block_cost exactly."""
+    cost = m["cost"]
+    away = (f"; from the nearest region with a study ({cost.lines[0].component.region})"
+            if cost.lines and ctx.get("cost_region") and ctx["cost_region"] != cost.lines[0].component.region else "")
+    budget = UCD_REASON + away
     acres = N(b.acres)
-    parts = [rec.step("Production: {0} per acre x {1} acres", [pc, acres], "{0}*{1}", round_to=2, money=True)]
+
+    ratios = {}  # (index name, base year) -> step
+
+    def ratio(ln):
+        c = ln.component
+        key = (c.index_name, c.base_year)
+        if key not in ratios:
+            label, unit = INDEX_LABELS.get(c.index_name, c.index_name), INDEX_UNITS.get(c.index_name, "index")
+            money = c.index_name in INDEX_UNITS
+            now = rec.inp(f"{label}, {ln.now.year}", ln.now.value, unit, sources.cost_index(ln.now), "reference",
+                          ln.now.estimate_reason, why_not="Published annual value", money=money)
+            if ln.base.year == ln.now.year:
+                base = now
+            else:
+                base = rec.inp(f"{label}, {ln.base.year}", ln.base.value, unit, sources.cost_index(ln.base),
+                               "reference", ln.base.estimate_reason, why_not="Published annual value", money=money)
+            ratios[key] = rec.step(f"{label} ratio, {ln.now.year} / {c.base_year} study year: {{0}} / {{1}}",
+                                   [now, base], "{0}/{1}", "", 6)
+        return ratios[key]
+
+    amounts = {}
+
+    def amount(c):
+        if id(c) not in amounts:
+            unit = {"per_acre": "$/acre", "per_ton": "$/ton", "per_acre_system": "$/acre/yr"}[c.basis]
+            per = {"per_acre": "per acre", "per_ton": "per ton", "per_acre_system": "per acre per year"}[c.basis]
+            name = COMPONENT_LABELS.get(c.component, c.component.replace("_", " ").capitalize())
+            if c.basis == "per_acre_system":
+                name = f"Irrigation system, {c.component.removeprefix('irrigation_system_').replace('_', '-')}"
+            if economics.is_ers(c):
+                study, reason = f"USDA ERS U.S. total {c.base_year}", c.estimate_reason
+            else:
+                study = f"UC Davis {c.region} {c.base_year} study" if c.base_year else "UC Davis study total"
+                reason = budget + (f"; {c.estimate_reason}" if c.estimate_reason else "")
+            amounts[id(c)] = rec.inp(f"{name} {per}, {study}", c.amount, unit,
+                                     sources.cost_component(b.crop, c), "reference", reason, money=True)
+        return amounts[id(c)]
+
+    indexed = [ln for ln in cost.lines if ln.now is not None]
+    for ln in indexed:
+        ratio(ln)
+    needs_weighted = any(ln.component.index_name == economics.WEIGHTED_INDEX for ln in cost.lines) or cost.system
+    weighted = None
+    if needs_weighted and indexed:
+        terms = []
+        for ln in indexed:
+            c = ln.component
+            if c.basis == "per_ton":
+                y = rec.inp(f"Yield in the UC Davis {c.region} {c.base_year} study", c.study_yield_tpa,
+                            "tons/acre", sources.cost_component(b.crop, c), "reference", budget)
+                w = rec.step(f"{COMPONENT_LABELS[c.component]} dollars per acre in the study: {{0}} per ton x {{1}} tons",
+                             [amount(c), y], "{0}*{1}", "", money=True)
+            else:
+                w = amount(c)
+            terms.append((w, ratios[(c.index_name, c.base_year)]))
+        ops = [x for pair in terms for x in pair] + [w for w, _ in terms]
+        n = len(terms)
+        num = " + ".join("{%d}*{%d}" % (2 * i, 2 * i + 1) for i in range(n))
+        den = " + ".join("{%d}" % (2 * n + i) for i in range(n))
+        weighted = rec.step("Weighted ratio for costs with no index of their own (other inputs, irrigation system): "
+                            f"({num.replace('*', ' x ')}) / ({den})", ops, f"({num})/({den})", "", 6)
+
+    def ratio_of(ln):
+        if ln.component.index_name == economics.WEIGHTED_INDEX:
+            return weighted
+        return ratios[(ln.component.index_name, ln.component.base_year)] if ln.now is not None else None
+
+    per_acre = [ln for ln in cost.lines if ln.component.basis == "per_acre"]
+    ops, terms = [], []
+    for ln in per_acre:
+        a = amount(ln.component)
+        r = ratio_of(ln)
+        if r is None:
+            terms.append("{%d}" % len(ops))
+            ops.append(a)
+        else:
+            terms.append("{%d}*{%d}" % (len(ops), len(ops) + 1))
+            ops += [a, r]
+    label = ("Inputs per acre (that year's USDA ERS values, not index scaled)"
+             if per_acre and all(economics.is_ers(ln.component) for ln in per_acre)
+             else "Inputs per acre (each study cost x its index ratio)")
+    per = rec.step(label + ": " + " + ".join(
+        t.replace("*", " x ") for t in terms), ops, " + ".join(terms), "", 2, money=True)
+    out = {"inputs": rec.step("Inputs cost: {0} per acre x {1} acres", [per, acres], "{0}*{1}", round_to=2, money=True)}
+
+    per_ton = [ln for ln in cost.lines if ln.component.basis == "per_ton"]
+    if per_ton:
+        ln = per_ton[0]
+        out["harvest"] = rec.step("Harvest cost: {0} tons x {1} per ton x {2} diesel ratio",
+                                  [tons, amount(ln.component), ratio_of(ln)], "{0}*{1}*{2}", round_to=2, money=True)
+    else:
+        # The study has no separate harvest charge: harvest is in its other lines.
+        first = cost.lines[0].component if cost.lines else None
+        h = rec.inp("Separate harvest and haul charge per ton", 0, "$/ton", sources.no_harvest_line(b.crop, first),
+                    "reference", first.estimate_reason if first is not None and economics.is_ers(first) else budget,
+                    money=True)
+        out["harvest"] = rec.step("Harvest cost: {0} tons x {1} per ton (no separate harvest line)", [tons, h],
+                                  "{0}*{1}", round_to=2, money=True)
+
+    if cost.system is None:
+        raise ValueError(f"{b.crop} on {b.irrigation} has no irrigation system cost data")
+    c = cost.system.component
+    kind = c.component.removeprefix("irrigation_system_").replace("_", "-")
+    pieces = economics.system_parts(c)
+    if pieces:
+        # Yearly system cost = installed cost per acre / system life, for each part in the study.
+        reason = budget + (f"; {c.estimate_reason}" if c.estimate_reason else "")
+        src = sources.cost_component(b.crop, c)
+        ops, terms = [], []
+        for line, installed, life in pieces:
+            i = rec.inp(f"{line}: installed cost per acre, UC Davis {c.region} {c.base_year} study", installed,
+                        "$/acre", src, "reference", reason, money=True)
+            n = rec.inp(f"{line}: system life, UC Davis {c.region} {c.base_year} study", life, "years", src,
+                        "reference", reason)
+            terms.append("{%d}/{%d}" % (len(ops), len(ops) + 1))
+            ops += [i, n]
+        sy = rec.step(f"Irrigation system ({kind}) per acre per year, installed cost / life: "
+                      + " + ".join(t.replace("/", " / ") for t in terms), ops, " + ".join(terms), "", 4, money=True)
+        if sy.value != c.amount:
+            raise ValueError(f"{sy.value} != {c.amount} for {c.region} {c.component}")
+    else:
+        sy = amount(c)
+    if weighted is None:  # USDA ERS rows: no index scaling
+        why = (" (USDA ERS whole-farm average per planted acre already includes these costs; no separate "
+               "irrigation system line)" if economics.is_ers(c) else "")
+        out["system"] = rec.step(f"Irrigation system cost ({kind}){why}: {{0}} per acre per year x {{1}} acres",
+                                 [sy, acres], "{0}*{1}", round_to=2, money=True)
+    else:
+        out["system"] = rec.step(f"Irrigation system cost ({kind}, installed cost / life): {{0}} per acre per year x "
+                                 "{1} weighted ratio x {2} acres", [sy, weighted, acres], "{0}*{1}*{2}",
+                                 round_to=2, money=True)
+    return out
+
+
+def full_cost_steps(rec, b, s, bt, season, tons):
+    """All cost steps for one block and season: inputs, harvest, water, irrigation system,
+    then their sum. Sets rec.parts to the four parts and returns the cost step."""
+    from backend import simulate as engine
+    req, ctx = bt.request, bt.context
+    m = s.money
+    defaults = engine._price_tables()[2]
+    named = cost_steps(rec, b, ctx, m, tons)
+
     grid, start, end, _ = season
     irr = reference.irrigation()[engine.IRRIGATION_KEYS.get(b.irrigation, b.irrigation)]
     net = sources.net_irrigation(b.crop, grid, start, end, req.optional.soil, s.capped)
     eff = sources.irrigation_efficiency(b.irrigation, irr)
-    water_src = Src(f"{net.text} Divided by {eff.text[0].lower()}{eff.text[1:]}", net.links + eff.links,
-                    net.derived_from + [f"Irrigation efficiency, {b.irrigation.replace('_', ' ')}"],
-                    net.verified and eff.verified)
     water = model_input(rec, "Water applied (to 0.0001 acre-ft)", m["water"], "acre-ft",
-                        "Model estimate from the FAO-56 daily water balance", water_src)
+                        "Model estimate: simulated irrigation water applied this season",
+                        sources.simulation([net.text, eff.text], net.verified and eff.verified))
     share = req.optional.surface_water_share
     sh = share_input(rec, req)
+    water_parts, labels = [], []
     if share > 0:
         sw = rec.step("Surface water: {0} acre-ft x {1}", [water, sh], "{0}*{1}", "acre-ft", 4)
-        parts.append(rec.step("Surface water cost: {0} acre-ft x {1} per acre-ft", [sw, water_price_input(rec, ctx)],
-                              "{0}*{1}", round_to=2, money=True))
+        water_parts.append(rec.step("Surface water cost: {0} acre-ft x {1} per acre-ft",
+                                    [sw, water_price_input(rec, ctx)], "{0}*{1}", round_to=2, money=True))
+        labels.append("surface water {%d}" % (len(labels)))
     if share < 1:
         gs = rec.inp("Groundwater share (1 - surface water share)", m["ground_share"], "fraction",
                      "Rest of the applied water after the surface share", "constant",
                      why_not="Complement of the surface water share")
         gw = rec.step("Groundwater: {0} acre-ft x {1}", [water, gs], "{0}*{1}", "acre-ft", 4)
         lift = rec.inp("Well lift", defaults["well_lift_ft"], "ft", sources.well_lift(defaults["well_lift_ft"]),
-                       "reference", f"Default assumption, {defaults['well_lift_ft']:g} ft well lift")
+                       "reference", "Team assumption")
         kwh_ft = const(rec, "Energy to lift 1 acre-ft by 1 ft", economics.KWH_PER_AF_FT, "kWh/(acre-ft x ft)",
                        sources.KWH, "Physical constant")
         eff = rec.inp("Pump efficiency", defaults["pump_efficiency"], "fraction",
                       sources.pump_efficiency(defaults["pump_efficiency"]), "reference",
                       f"Default assumption, {defaults['pump_efficiency']:.0%} pump efficiency")
         elec = m["elec"]
-        cents = economics.normalize_unit(elec.unit) == "CENTS/KWH"
-        e = rec.inp(f"Electricity price, {elec.year}", elec.value, "cents/kWh" if cents else "$/kWh",
-                    sources.electricity(elec), "reference",
-                    "California average commercial rate (EIA), not this farm's tariff", money=not cents)
-        if cents:
-            c100 = const(rec, "Cents per dollar", 100, "cents/$", sources.CENTS, "Unit conversion")
-            e = rec.step("Electricity: {0} cents/kWh / {1} cents per $", [e, c100], "{0}/{1}", "$/kWh")
-        parts.append(rec.step("Groundwater cost: {0} acre-ft x {1} ft x {2} kWh / {3} x {4} per kWh",
-                              [gw, lift, kwh_ft, eff, N(e.value, True)], "{0}*{1}*{2}/{3}*{4}", round_to=2, money=True))
-    total = rec.step("Cost: " + " + ".join("{%d}" % i for i in range(len(parts))), parts,
-                     " + ".join("{%d}" % i for i in range(len(parts))), round_to=0, money=True)
-    rec.step("Margin: sales {0} - cost {1}", [sales, total], "{0}-{1}", money=True)
-    return rec.out(r.profit)
+        reason = "California average commercial rate (EIA), not this farm's tariff"
+        e = rec.inp(f"Electricity price, {elec.year}", elec.value, "$/kWh", sources.electricity(elec), "reference",
+                    reason + (f"; {elec.estimate_reason}" if elec.is_estimate else ""), money=True)
+        water_parts.append(rec.step("Groundwater pumping cost: {0} acre-ft x {1} ft x {2} kWh / {3} x {4} per kWh",
+                                    [gw, lift, kwh_ft, eff, e], "{0}*{1}*{2}/{3}*{4}", round_to=2, money=True))
+        labels.append("groundwater pumping {%d}" % (len(labels)))
+    expr = " + ".join("{%d}" % i for i in range(len(water_parts)))
+    # Each acre-ft comes from one source: the surface share at the district price, the rest pumped.
+    source = ("surface water only" if share == 1 else "wells only" if share == 0
+              else f"{share:.0%} surface water, {1 - share:.0%} wells")
+    water_cost = rec.step(f"Water cost ({source}): " + " + ".join(labels), water_parts, expr,
+                          round_to=2, money=True)
+
+    parts = [named["inputs"], named["harvest"], water_cost, named["system"]]
+    total = rec.step("Cost: inputs {0} + harvest {1} + water {2} + irrigation system {3}", parts,
+                     "{0} + {1} + {2} + {3}", round_to=0, money=True)
+    rec.parts = [{"name": n, "value": p.value, "step": f"{n}: {p.text}"} for n, p in zip(COST_PART_NAMES, parts)]
+    return total
+
+
+def cost_record(rid, b, r, s, bt, name, season):
+    """Estimated cost of one block in one season, as its four parts."""
+    m = s.money
+    rec = Record(rid, f"Estimated cost, {name}, {r.year}", "$", 0, COST_FORMULA, COST_ROUNDING)
+    acres_input(rec, b, bt.request.blocks)
+    tons = model_input(rec, f"{crop_name(b.crop)} harvest this season", m["tons"], "tons",
+                       "Model estimate: simulated harvest (baseline yield x relative yield / median x acres)",
+                       sources.simulation(["USDA NASS median yield", "Relative yield (FAO-33 Ky, FAO-56 water use)"]))
+    full_cost_steps(rec, b, s, bt, season, tons)
+    return rec.out(r.cost)
 
 
 # ---------------------------------------------------------------- data table rows and Average row
@@ -896,11 +1084,40 @@ def table_records(response, req, ctx):
 
 # ---------------------------------------------------------------- entry points
 
+def table_cost_parts(bt, response, scope, per_acre):
+    """Average of the four cost parts over the years with a cost, for the table's Average
+    cost box: the same blocks and acres as table_series uses for that scope."""
+    blocks = [b for b in response.blocks if scope == "farm" or b.id == scope]
+    sums = {n: [] for n in COST_PART_NAMES}
+    for y in response.years:
+        costs = [bt.seasons[b.id][y].money["cost"] for b in blocks
+                 if bt.seasons[b.id][y].money and bt.seasons[b.id][y].cost is not None]
+        if not costs:
+            continue
+        acres = exact_sum(b.acres for b in blocks if bt.seasons[b.id][y].money) if per_acre else 1.0
+        for n, attr in zip(COST_PART_NAMES, ("inputs", "harvest", "water", "irrigation_system")):
+            sums[n].append(sum(getattr(c, attr) for c in costs) / acres)
+    if not sums["Inputs"]:
+        return None
+    per = " per acre" if per_acre else ""
+    return [{"name": n, "value": rnd(sum(v) / len(v)),
+             "step": f"Average {n.lower()} cost{per} over {len(v)} years, to $1 (parts can differ from the "
+                     "total by $1 after rounding)"} for n, v in sums.items()]
+
+
 def simulate_records(bt, response, wx):
     req, ctx = bt.request, bt.context
     out = summary_records(response, req, ctx)
     out.update(block_year_records(bt, response, wx))
     out.update(table_records(response, req, ctx))
+    for rid, rec in out.items():
+        m = re.fullmatch(r"table\.(.+)\.(total|per_acre)\.cost", rid)
+        if m:
+            parts = table_cost_parts(bt, response, m.group(1), m.group(2) == "per_acre")
+            if parts:
+                rec["parts"] = parts
+    if "summary.avg_cost" in out and "table.farm.total.cost" in out:
+        out["summary.avg_cost"]["parts"] = out["table.farm.total.cost"].get("parts")
     return out
 
 

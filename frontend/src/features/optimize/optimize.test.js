@@ -56,8 +56,9 @@ test("request matches the POST /api/optimize contract", () => {
   assert.deepEqual(Object.keys(req).sort(), [
     "allow_new_perennials", "allowed_crops", "allowed_irrigation", "available_acres",
     "budget_rule", "budget_usd", "current_farm", "location", "max_share_per_crop",
-    "min_block_acres", "objective", "price_mode", "soil", "water_available_af", "years",
+    "min_block_acres", "objective", "price_mode", "soil", "surface_water_share", "water_available_af", "years",
   ]);
+  assert.equal(req.surface_water_share, DEFAULT_FARM.optional.surface_water_share); // same water source as the backtest
   assert.equal(req.allowed_crops, null); // every crop checked means no filter
   assert.equal(req.allowed_irrigation, null);
   assert.equal(req.objective, "profit");

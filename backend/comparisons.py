@@ -16,8 +16,10 @@ def _system(block):
 
 
 def _alternatives(block):
+    from backend.simulate import irrigation_available
     for irrigation in get_args(Irrigation):
-        if irrigation != block.irrigation:
+        # Only irrigation types with cost data for the crop are offered.
+        if irrigation != block.irrigation and irrigation_available(block.crop, irrigation):
             yield "irrigation", block.model_copy(update={"irrigation": irrigation})
     if block.crop in PERENNIALS:
         return
@@ -79,7 +81,8 @@ def build_comparisons(farm, baseline_response, *, wx=None, context=None):
                     baseline_response.assumptions.append(note)
                 continue
             alternative = next(b for b in response.blocks if b.id == block.id)
-            excludes = ("Installation cost of the new system is not included." if kind == "irrigation"
+            excludes = ("One-time cost of converting to the new system is not included; its yearly system cost "
+                        "(installed cost over its life) is, where a UC Davis study prices it." if kind == "irrigation"
                         else "Market timing and field operations for a different planting month are not included.")
             if farm.optional.water_available_af is not None:
                 excludes += " Changes describe this crop entry; water redistribution can also affect other entries."
