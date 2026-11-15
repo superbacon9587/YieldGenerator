@@ -1,12 +1,40 @@
 // Calculation records from the backend (backend/calculations.py). Pure helpers, no React.
 //   record = {id, label, value, unit, decimals, formula_text, is_estimate,
 //             steps: [{text, expr, result}],
-//             inputs: [{name, value, unit, source, source_url, kind, is_estimate,
+//             inputs: [{name, value, unit, source, source_url, links: [{label, url}],
+//                       derived_from: [text], source_verified, kind, is_estimate,
 //                       estimate_reason, not_estimate_reason}]}
 import { LB_PER_TON } from "../yield/yieldUnits.js";
 
 const finite = (v) => typeof v === "number" && Number.isFinite(v);
 const WEIGHT_UNITS = new Set(["tons", "tons/acre"]);
+
+/** Publisher pages only: https, never the code repository. */
+const publisherLink = (url) =>
+  typeof url === "string" && url.startsWith("https://") && !url.includes("github.com");
+
+/**
+ * What the Source cell shows for one input: the farmer-readable text, the
+ * "From: ..." line for estimates, publisher links, and whether the source has
+ * been checked (false shows "Source not yet verified").
+ */
+export function sourceParts(input) {
+  const links = (
+    input.links ?? (input.source_url ? [{ label: "Publisher page", url: input.source_url }] : [])
+  ).filter((l) => publisherLink(l.url));
+  const derived = input.derived_from ?? [];
+  return {
+    text: input.source,
+    from: derived.length ? `From: ${derived.join(", ")}` : null,
+    links,
+    verified: input.source_verified !== false,
+  };
+}
+
+const unique = (items, key = (x) => x) => {
+  const seen = new Set();
+  return items.filter((x) => (seen.has(key(x)) ? false : seen.add(key(x))));
+};
 
 /** Number with commas and up to `d` decimals, trailing zeros dropped. */
 export function plain(v, d = 2) {
@@ -68,8 +96,11 @@ export function inWeightUnit(record, weightUnit) {
         name: "Pounds per ton",
         value: LB_PER_TON,
         unit: "lb/ton",
-        source: "US short ton",
+        source: "US short ton: 2,000 lb",
         source_url: null,
+        links: [],
+        derived_from: [],
+        source_verified: true,
         kind: "constant",
         is_estimate: false,
         estimate_reason: null,
@@ -88,6 +119,23 @@ const fmtDelta = (v, unit, d) => {
   if (unit === "%") return `${plain(v, d)} pp`;
   return `${plain(v, d)} ${unit}`;
 };
+
+/** Source of one side of a comparison: the data behind that side's own box. */
+function comparedSource(who, record) {
+  const inputs = record.inputs ?? [];
+  const estimated = inputs.filter((i) => i.is_estimate);
+  const links = unique(
+    inputs.flatMap((i) => sourceParts(i).links),
+    (l) => l.url,
+  );
+  return {
+    source: `${who} results, shown in the "${record.label}" box. The data behind it is listed there.`,
+    source_url: links[0]?.url ?? null,
+    links,
+    derived_from: unique(estimated.flatMap((i) => i.derived_from ?? [])),
+    source_verified: inputs.every((i) => i.source_verified !== false),
+  };
+}
 
 /**
  * Changed minus original, built from the two backend records so the popover
@@ -123,8 +171,7 @@ export function differenceRecord(changed, original, label) {
       name: `${who}: ${r.label}`,
       value: r.value,
       unit: r.unit,
-      source: `${who} backtest, ${r.id}`,
-      source_url: null,
+      ...comparedSource(who, r),
       kind: "model",
       is_estimate: isEstimated(r),
       estimate_reason: isEstimated(r) ? "Model estimate from the backtest" : null,
