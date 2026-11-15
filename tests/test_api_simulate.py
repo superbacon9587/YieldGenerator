@@ -36,7 +36,10 @@ def test_simulate_endpoint(client, monkeypatch):
     assert set(data) == {"location", "years", "blocks", "farm_totals", "summary",
                          "waste_flags", "assumptions", "comparisons",
                          "summary_stats", "budget", "land", "yield_weight"}
-    assert len(data["comparisons"]) == 9
+    # 3 blocks x 3 other irrigation types, plus corn and oats planting windows
+    # (each window list from crops.json minus the current start month).
+    kinds = [row["kind"] for row in data["comparisons"]]
+    assert kinds.count("irrigation") == 9 and kinds.count("planting_window") == 6
     assert all("excludes" in row for row in data["comparisons"])
     assert data["location"]["county"] == "Merced"
     assert data["location"]["cost_region"] == "San Joaquin Valley North"

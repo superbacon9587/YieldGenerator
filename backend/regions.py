@@ -53,7 +53,7 @@ DEFAULT_REGION = "San Joaquin Valley North"
 COST_UNIT = "$ / ACRE"
 OUTSIDE_CA_NOTE = (
     "Location is outside California. Water and yield use NASA data for this location, "
-    "but dollar values use California prices and costs, so treat them as rough estimates."
+    "but dollar values use California prices and costs, so they are rough estimates."
 )
 CROP_LABELS = {
     "almonds": "Almond",
@@ -218,7 +218,7 @@ def build_context(location: dict, tables: Tables | None = None, crops: list[str]
     costs = _production_costs(t, region, crops, notes)
     water = _water_price(t, county if in_ca else None, region)
     water_region = "Merced Irrigation District" if (in_ca and county == "Merced") else (region or DEFAULT_REGION)
-    notes.append(f"Surface water price is a typical {water_region} value; replace it with your district's rate.")
+    notes.append(f"Surface water price uses a typical {water_region} value. Actual district rates vary.")
 
     return {
         "state": location.get("state"),

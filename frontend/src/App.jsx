@@ -7,6 +7,7 @@ import {
   FlaskConical,
   PanelLeftClose,
   Scale,
+  Target,
   Check,
   Info,
   Menu,
@@ -15,6 +16,7 @@ import {
 import FarmForm from "./components/FarmForm.jsx";
 const Results = lazy(() => import("./components/Results.jsx"));
 const ComparePage = lazy(() => import("./features/compare/ComparePage.jsx"));
+const OptimizePage = lazy(() => import("./features/optimize/OptimizePage.jsx"));
 import {
   DEFAULT_FARM,
   clone,
@@ -92,8 +94,8 @@ export default function App() {
   useEffect(() => {
     heading.current?.focus();
   }, [view]);
-  async function run() {
-    const request = requestFromForm(farm);
+  async function run(source = farm) {
+    const request = requestFromForm(source);
     const errors = validateFarm(request);
     if (errors.length) {
       setError(errors.join(" "));
@@ -170,6 +172,13 @@ export default function App() {
           >
             <Scale size={18} /> Compare setups<span>03</span>
           </button>
+          <button
+            className={view === "optimize" ? "active" : ""}
+            aria-current={view === "optimize" ? "page" : undefined}
+            onClick={() => navigate("optimize")}
+          >
+            <Target size={18} /> Optimize<span>04</span>
+          </button>
         </nav>
         <div className="sidebar-note">
           <div className="orbit" aria-hidden="true">
@@ -217,7 +226,9 @@ export default function App() {
               <b>
                 {view === "farm"
                   ? "Your farm"
-                  : view === "compare"
+                  : view === "optimize"
+                    ? "Optimize"
+                    : view === "compare"
                     ? "Compare setups"
                     : "Backtest results"}
               </b>
@@ -248,21 +259,27 @@ export default function App() {
               <p className="eyebrow">
                 {view === "farm"
                   ? "START WITH WHAT YOU GROW"
-                  : view === "compare"
+                  : view === "optimize"
+                    ? "SAME LAND. SAME WEATHER. MORE OPTIONS."
+                    : view === "compare"
                     ? "SAME WEATHER. DIFFERENT SETUPS."
                     : "UNDERSTAND THE PAST. EXPLORE WHAT’S NEXT."}
               </p>
               <h1 ref={heading} tabIndex="-1">
                 {view === "farm"
                   ? "Every farm has a story."
-                  : view === "compare"
+                  : view === "optimize"
+                    ? "Find a plan."
+                    : view === "compare"
                     ? "Compare setups."
                     : "Your farm, through the years."}
               </h1>
               <p>
                 {view === "farm"
                   ? "Tell us about yours. Explore yield, water needs, and the possibilities in between."
-                  : view === "compare"
+                  : view === "optimize"
+                    ? "Search crop, irrigation, and planting month choices within your land, budget, and water, over the same historical weather."
+                    : view === "compare"
                     ? "Put saved setups side by side over the same years and weather."
                     : "Explore historical outcomes, understand the assumptions, and compare a change."}
               </p>
@@ -308,6 +325,26 @@ export default function App() {
                 setError("");
               }}
             />
+          ) : view === "optimize" ? (
+            <Suspense
+              fallback={
+                <div className="panel" role="status">
+                  Loading the optimizer...
+                </div>
+              }
+            >
+              <OptimizePage
+                farm={farm}
+                setFarm={setFarm}
+                mock={mock}
+                onBacktest={(next) => {
+                  setFarm(next);
+                  setError("");
+                  setView("farm");
+                  run(next);
+                }}
+              />
+            </Suspense>
           ) : view === "compare" ? (
             <Suspense
               fallback={

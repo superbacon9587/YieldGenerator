@@ -1,5 +1,6 @@
 {
   "_note": "Each field is {value, source, verify}. verify=false: copied from the cited FAO PDF in data/raw/fao/. verify=true: placeholder or outside publication that still needs checking. fao56_ch6.pdf page numbers are the printed page footers (n/32). fao66.pdf pages give the printed page number and the PDF page index. Temperatures in degC. season_start_month is 1 to 12. No winter chill fields in this version.",
+  "_planting_note": "planting_months lists the months (1 to 12) in which a planting can start in the Central Valley; every annual has one and perennials have planting_months null (treated as year-round). season_days is the total days from planting to harvest, computed as the sum of that crop's stage_days. Both were added in iteration 2 for the optimizer. frost_tolerant (annuals only) says whether the crop handles frost in its first 45 days; the optimizer leaves out options for crops that are not frost tolerant when frost occurred within 45 days of planting in more than 20 percent of the backtest years (backend/frost.py).",
   "almonds": {
     "type": "perennial",
     "kc": {
@@ -17,6 +18,7 @@
       "source": "fao56_ch6.pdf, Table 11, p. 5 (Deciduous Orchard, Calif., USA, plant date March; proxy, no almond row)",
       "verify": true
     },
+    "planting_months": null,
     "ky": {
       "value": 0.8,
       "source": "Placeholder. fao66.pdf gives no seasonal Ky for almond. Almond chapter, printed p. 365 (PDF p. 375), reports slopes of 0.7 to 0.9 for relative yield vs relative APPLIED water (not ET), so it is not a Ky",
@@ -50,6 +52,7 @@
       "source": "fao56_ch6.pdf, Table 11, p. 5 (Walnuts, Utah, USA, plant date April)",
       "verify": false
     },
+    "planting_months": null,
     "ky": {
       "value": 0.8,
       "source": "Placeholder. fao66.pdf gives no seasonal Ky for walnut. Walnut chapter, printed p. 411 (PDF p. 418), reports marketable yield losses of 50% and 32% after three years at 33% and 66% of ETc (Goldhamer 1997), not a seasonal Ky",
@@ -82,6 +85,21 @@
       "value": 4,
       "source": "fao56_ch6.pdf, Table 11, p. 2 (Tomato, Calif., USA, plant date Apr/May; first month used)",
       "verify": false
+    },
+    "planting_months": {
+      "value": [3, 4, 5],
+      "source": "UC ANR Publication 7228, Processing Tomato Production in California (Hartz et al. 2008): Central Valley transplanting runs roughly March to May. February was removed because no checked UC source supports it, and early June plantings are left out so the 155 day season (season_days) is harvested by October. Window not yet checked against the publication text",
+      "verify": true
+    },
+    "season_days": {
+      "value": 155,
+      "source": "Sum of the existing stage_days (ini + dev + mid + late = 35 + 40 + 50 + 30 = 155); stage_days from fao56_ch6.pdf, Table 11, p. 2",
+      "verify": false
+    },
+    "frost_tolerant": {
+      "value": false,
+      "source": "UC ANR Publication 7228, Processing Tomato Production in California (Hartz et al. 2008): tomato is a warm season crop and transplants are damaged by frost. Not yet checked against the publication text",
+      "verify": true
     },
     "ky": {
       "value": 1.05,
@@ -116,6 +134,21 @@
       "source": "fao56_ch6.pdf, Table 11, p. 4 (Maize (grain), Spain; Calif., plant date April)",
       "verify": false
     },
+    "planting_months": {
+      "value": [3, 4, 5, 6],
+      "source": "UC Davis Agronomy Research and Information Center, Corn (field corn) production in California: Central Valley grain corn is planted from March through June, with the later dates following a winter small grain. Window not yet checked against the publication text",
+      "verify": true
+    },
+    "season_days": {
+      "value": 150,
+      "source": "Sum of the existing stage_days (ini + dev + mid + late = 30 + 40 + 50 + 30 = 150); stage_days from fao56_ch6.pdf, Table 11, p. 4",
+      "verify": false
+    },
+    "frost_tolerant": {
+      "value": false,
+      "source": "UC Davis Agronomy Research and Information Center, Corn (field corn) production in California: corn is a warm season crop planted after soils warm, and young plants are damaged by frost. Not yet checked against the publication text",
+      "verify": true
+    },
     "ky": {
       "value": 1.25,
       "source": "fao66.pdf, Table 1, printed p. 7 (PDF p. 22): seasonal Ky, Maize",
@@ -148,6 +181,21 @@
       "value": 12,
       "source": "fao56_ch6.pdf, Table 11, p. 4 (Barley/Oats/Wheat, Calif. Desert, USA, plant date Dec)",
       "verify": false
+    },
+    "planting_months": {
+      "value": [10, 11, 12, 1],
+      "source": "UC ANR Small Grain Production Manual (UC Davis Agronomy Research and Information Center): Central Valley small grains are fall sown, mid October through December, with January plantings possible after a wet fall. Window not yet checked against the publication text",
+      "verify": true
+    },
+    "season_days": {
+      "value": 160,
+      "source": "Sum of the existing stage_days (ini + dev + mid + late = 20 + 50 + 60 + 30 = 160); stage_days from fao56_ch6.pdf, Table 11, p. 4",
+      "verify": false
+    },
+    "frost_tolerant": {
+      "value": true,
+      "source": "UC ANR Small Grain Production Manual (UC Davis Agronomy Research and Information Center): fall sown small grains grow through Central Valley winters, including frost. Not yet checked against the publication text",
+      "verify": true
     },
     "ky": {
       "value": 1.05,
@@ -182,6 +230,7 @@
       "source": "Placeholder within the range in fao56_ch6.pdf, Table 11, p. 5 (Alfalfa 1st cutting cycle, Calif., USA, plant date Jan to Apr, last -4 C)",
       "verify": true
     },
+    "planting_months": null,
     "ky": {
       "value": 1.1,
       "source": "fao66.pdf, Table 1, printed p. 7 (PDF p. 22): seasonal Ky, Alfalfa",

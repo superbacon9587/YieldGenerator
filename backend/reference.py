@@ -5,6 +5,17 @@ Each file is read once per process (functools.cache). Every entry carries
 needs checking against the cited source. In crops.json each field (except
 "type") is its own {value, source, verify} record; crop_params() strips those.
 
+Planting windows (iteration 2, for the optimizer):
+    planting_months  annuals: {value: [months 1 to 12], source, verify}, the
+                     months a Central Valley planting can start. Perennials
+                     store a bare null and are treated as year-round.
+    season_days      annuals only: days from planting to harvest, the sum of
+                     the crop's stage_days. Perennials do not have this field.
+    frost_tolerant   annuals only: true when the crop handles frost in its first
+                     45 days (backend/frost.py). Perennials do not have it.
+Use planting_months(), season_days() and frost_tolerant() rather than reading
+these directly.
+
 Crop keys match data/reference/prices/crop_prices.csv: almonds, walnuts,
 processing_tomatoes, corn, oats, alfalfa_hay.
 """
@@ -55,6 +66,25 @@ def crop_params(name: str) -> dict:
 def unverified_fields(name: str) -> list[str]:
     """Fields of a crop still marked verify=true."""
     return [k for k, v in get_crop(name).items() if isinstance(v, dict) and v.get("verify")]
+
+
+def is_annual(name: str) -> bool:
+    return get_crop(name)["type"] == "annual"
+
+
+def planting_months(name: str) -> list[int] | None:
+    """Valid planting start months (1 to 12) for an annual; None for a perennial (year-round)."""
+    return crop_params(name).get("planting_months")
+
+
+def season_days(name: str) -> int | None:
+    """Days from planting to harvest for an annual (sum of stage_days); None for a perennial."""
+    return crop_params(name).get("season_days")
+
+
+def frost_tolerant(name: str) -> bool | None:
+    """True or False for an annual (crops.json frost_tolerant); None for a perennial."""
+    return crop_params(name).get("frost_tolerant")
 
 
 def irrigation_efficiency(system: str) -> float:

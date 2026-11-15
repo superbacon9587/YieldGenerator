@@ -121,16 +121,21 @@ def test_census_falls_back_to_open_meteo(monkeypatch):
 CROPS = ["almonds", "walnuts", "processing_tomatoes", "corn", "oats", "alfalfa_hay"]
 
 
-CROP_FIELDS = {"type", "kc", "stage_days", "season_start_month", "ky", "gdd_base_c", "heat_stress_c"}
+CROP_FIELDS = {"type", "kc", "stage_days", "season_start_month", "ky", "gdd_base_c", "heat_stress_c",
+               "planting_months"}
+ANNUAL_ONLY_FIELDS = {"season_days", "frost_tolerant"}
+ANNUALS = ["processing_tomatoes", "corn", "oats"]
+PERENNIALS = ["almonds", "walnuts", "alfalfa_hay"]
 
 
 def test_reference_crops_complete():
     crops = reference.crops()
     assert sorted(crops) == sorted(CROPS)
     for name, raw in crops.items():
-        assert set(raw) == CROP_FIELDS, name  # also guarantees no chill fields
+        expected = CROP_FIELDS | (ANNUAL_ONLY_FIELDS if raw["type"] == "annual" else set())
+        assert set(raw) == expected, name  # also guarantees no chill fields
         for field, entry in raw.items():
-            if field == "type":
+            if field == "type" or entry is None:  # perennial planting_months is a bare null
                 continue
             assert set(entry) == {"value", "source", "verify"}, (name, field)
             assert isinstance(entry["verify"], bool) and entry["source"], (name, field)
@@ -144,11 +149,37 @@ def test_reference_crops_complete():
         assert 0 < c["ky"] < 2
 
 
+def test_every_annual_has_planting_months_and_season_days():
+    annuals = [name for name, raw in reference.crops().items() if raw["type"] == "annual"]
+    assert sorted(annuals) == sorted(ANNUALS)
+    for name in annuals:
+        raw = reference.get_crop(name)
+        months = reference.planting_months(name)
+        assert isinstance(months, list) and months, name
+        assert all(isinstance(m, int) and 1 <= m <= 12 for m in months), name
+        assert len(set(months)) == len(months), name
+        assert raw["planting_months"]["verify"] is True, name
+        assert "UC ANR" in raw["planting_months"]["source"] or "UC Davis" in raw["planting_months"]["source"], name
+        stages = reference.crop_params(name)["stage_days"]
+        assert reference.season_days(name) == sum(stages.values()), name
+        assert "sum" in raw["season_days"]["source"].lower(), name
+        assert isinstance(reference.frost_tolerant(name), bool), name
+        assert raw["frost_tolerant"]["verify"] is True and raw["frost_tolerant"]["source"], name
+    assert [reference.frost_tolerant(c) for c in ("oats", "processing_tomatoes", "corn")] == [True, False, False]
+    assert reference.planting_months("processing_tomatoes") == [3, 4, 5]  # no February
+    for name in PERENNIALS:
+        assert reference.frost_tolerant(name) is None, name
+        assert reference.get_crop(name)["planting_months"] is None, name
+        assert reference.planting_months(name) is None and reference.season_days(name) is None, name
+        assert not reference.is_annual(name)
+
+
 def test_crop_params_and_unverified():
     corn = reference.crop_params("corn")
     assert corn["kc"] == {"ini": 0.30, "mid": 1.20, "end": 0.35}
     assert corn["ky"] == 1.25
-    assert reference.unverified_fields("corn") == ["gdd_base_c", "heat_stress_c"]
+    assert corn["planting_months"] == [3, 4, 5, 6] and corn["season_days"] == 150
+    assert reference.unverified_fields("corn") == ["planting_months", "frost_tolerant", "gdd_base_c", "heat_stress_c"]
 
 
 def test_reference_crop_keys_match_price_table():

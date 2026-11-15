@@ -701,7 +701,7 @@ def build_response(bt: Backtest) -> SimulateResponse:
     if left_out:
         assumptions.append("Farm dollar totals only add up blocks with price data (left out: "
                            + ", ".join(left_out) + ").")
-    assumptions.append(f"Best, worst, and typical years are ranked by {metric}.")
+    assumptions.append(f"The summary's high, low, and typical years are ranked by {metric}.")
 
     # Harvest weight in tons (backend/yield_weight.py).
     weight_notes: dict[str, None] = {}
@@ -738,6 +738,9 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
     bt.context = ctx
     apply_money(bt, ctx)
     response = build_response(bt)
+    # Frost within 45 days of planting for annual blocks (backend/frost.py), as neutral facts.
+    from backend import frost
+    response.assumptions.extend(frost.block_notes(request.blocks, prepare_weather(wx), bt.years))
     if include_comparisons:
         from backend.comparisons import build_comparisons
         response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
