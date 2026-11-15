@@ -11,6 +11,7 @@ import {
   compactStep,
   formulaEquation,
   tableEquations,
+  formatInputValue,
 } from "./calcRecords.js";
 import "./provenance.css";
 
@@ -79,7 +80,7 @@ function Popover({ record, display, close }) {
         <thead><tr><th>Input</th><th>Value</th><th>Year</th></tr></thead>
         <tbody>{record.inputs.map((input,index) => <tr key={index}>
           <th scope="row">{input.name}{inputReference(input).basis === "Assumption" && <small>Assumption</small>}</th>
-          <td>{typeof input.value === "number" ? input.value.toLocaleString("en-US",{maximumFractionDigits:6}) : String(input.value ?? "Not available")} {input.unit}</td>
+          <td>{formatInputValue(input)}</td>
           <td>{inputReference(input).year}</td>
         </tr>)}</tbody>
       </table></div>

@@ -217,3 +217,17 @@ export function tableEquations(record) {
     equations.push("Cost(year) = sum of (crop acres × non-water cost per acre) + surface-water expense(year) + pumping electricity expense(year)");
   return equations;
 }
+
+/** Preserve input precision while placing currency before the amount. */
+export function formatInputValue(input) {
+  if (input.value == null) return "Not available";
+  const unit = input.unit ?? "";
+  if (typeof input.value !== "number") return `${input.value}${unit ? ` ${unit}` : ""}`;
+  const value = input.value.toLocaleString("en-US", {maximumFractionDigits:6});
+  const currency = unit.match(/^\$\s*(.*)$/);
+  if (currency) {
+    const amount = Math.abs(input.value).toLocaleString("en-US", {maximumFractionDigits:6});
+    return `${input.value < 0 ? "-" : ""}$${amount}${currency[1].replace(/\s*\/\s*/g,"/")}`;
+  }
+  return `${value}${unit ? ` ${unit}` : ""}`;
+}
