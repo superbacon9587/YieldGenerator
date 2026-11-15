@@ -113,3 +113,17 @@ def test_meta_drops_presets_longer_than_history(client, monkeypatch):
     import datetime as dt
     monkeypatch.setattr(power_client, "default_end_date", lambda today=None: dt.date(2010, 12, 31))
     assert client.get("/api/meta").json()["presets"] == [5, 10, 20]
+
+
+def test_compare_rejects_ui_fields_inside_farm_with_clear_422(client):
+    """The backend stays strict: UI-only fields in a farm are a 422 naming each field."""
+    dirty = dict(farm("drip"), period="20", optimize={"objective": "profit"})
+    body = {"configs": [{"name": "A", "farm": dirty},
+                        {"name": "B", "farm": farm("flood")}]}
+    r = client.post("/api/compare", json=body)
+    assert r.status_code == 422, r.text
+    errors = r.json()["detail"]
+    bad = {(tuple(e["loc"]), e["type"]) for e in errors}
+    assert (("body", "configs", 0, "farm", "period"), "extra_forbidden") in bad
+    assert (("body", "configs", 0, "farm", "optimize"), "extra_forbidden") in bad
+    assert all("Extra inputs are not permitted" in e["msg"] for e in errors)

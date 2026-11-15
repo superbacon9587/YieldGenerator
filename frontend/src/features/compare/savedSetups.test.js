@@ -21,13 +21,13 @@ function memoryStorage() {
   };
 }
 
-test("setups save under yg_saved_setups with name, farm, saved_at, summary_stats", () => {
+test("setups save under yg_saved_setups with name, farm, ui, saved_at, summary_stats", () => {
   const storage = memoryStorage();
   const now = new Date("2026-11-14T12:00:00Z");
   const list = addSetup([], { name: "  Today ", farm: DEFAULT_FARM, summary_stats: { avg_profit: 1 } }, now);
   assert.ok(persistSetups(list, storage));
   const raw = JSON.parse(storage.getItem(SETUPS_KEY));
-  assert.deepEqual(Object.keys(raw[0]), ["name", "farm", "saved_at", "summary_stats"]);
+  assert.deepEqual(Object.keys(raw[0]), ["name", "farm", "ui", "saved_at", "summary_stats"]);
   assert.equal(raw[0].name, "Today");
   assert.equal(raw[0].saved_at, "2026-11-14T12:00:00.000Z");
   assert.deepEqual(loadSetups(storage), raw);

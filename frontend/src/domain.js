@@ -96,16 +96,63 @@ export const activeMonth = (m, start, end) =>
   start <= end ? m >= start && m <= end : m >= start || m <= end;
 export const toAcres = (value, unit) =>
   unit === "sqft" ? Number(value) / 43560 : Number(value);
-export function requestFromForm(form) {
-  return {
+const blankToNull = (v) => (v === "" || v == null ? null : Number(v));
+const toNum = (v) => (v === "" || v == null ? NaN : Number(v));
+
+/** [first, last] for an N-year preset ending at the last full year. */
+export function presetYears(
+  preset,
+  meta = { first_year: 1985, last_full_year: new Date().getFullYear() - 1 },
+) {
+  const n = Number(preset);
+  const last = meta.last_full_year;
+  return [Math.max(meta.first_year, last - n + 1), last];
+}
+
+// Top-level farm keys the backend accepts (docs/api_contract.md, Request).
+const REQUEST_KEYS = new Set([
+  "location",
+  "years",
+  "price_mode",
+  "blocks",
+  "optional",
+  "available_acres",
+]);
+const OPTIONAL_KEYS = {
+  soil: (v) => v,
+  budget_usd: blankToNull,
+  water_available_af: blankToNull,
+  water_applied_af: blankToNull,
+  surface_water_share: toNum,
+};
+
+function requestYears(farm, meta) {
+  const y = farm.years;
+  if (Array.isArray(y) && y.length === 2 && y.every((v) => v !== "" && v != null))
+    return y.map(Number);
+  const preset = Number(farm.period);
+  if (farm.period != null && farm.period !== "custom" && Number.isFinite(preset) && preset > 0)
+    return meta ? presetYears(preset, meta) : presetYears(preset);
+  return Array.isArray(y) ? y.map(Number) : y;
+}
+
+/**
+ * The exact POST /api/simulate body for a farm (form state, saved setup, or
+ * an older stored farm). Copies only contract fields and drops UI-only ones
+ * such as period and optimize, so the strict backend never sees them. A
+ * stored period preset becomes years when years are missing.
+ */
+export function toSimulateRequest(farm, meta) {
+  const loc = farm.location ?? {};
+  const out = {
     location: {
-      lat: form.location.lat === "" ? NaN : Number(form.location.lat),
-      lon: form.location.lon === "" ? NaN : Number(form.location.lon),
-      label: form.location.label,
+      lat: toNum(loc.lat),
+      lon: toNum(loc.lon),
+      ...(loc.label != null ? { label: loc.label } : {}),
     },
-    years: form.years.map(Number),
-    price_mode: form.price_mode,
-    blocks: form.blocks.map(
+    years: requestYears(farm, meta),
+    price_mode: farm.price_mode ?? "current",
+    blocks: (farm.blocks ?? []).map(
       ({ id, crop, acres, irrigation, start_month, end_month }) => ({
         id,
         crop,
@@ -115,30 +162,24 @@ export function requestFromForm(form) {
         end_month: Number(end_month),
       }),
     ),
-    optional: {
-      soil: form.optional.soil,
-      water_available_af:
-        form.optional.water_available_af === "" ||
-        form.optional.water_available_af == null
-          ? null
-          : Number(form.optional.water_available_af),
-      water_applied_af:
-        form.optional.water_applied_af === "" ||
-        form.optional.water_applied_af == null
-          ? null
-          : Number(form.optional.water_applied_af),
-      surface_water_share: Number(form.optional.surface_water_share),
-      budget_usd:
-        form.optional.budget_usd === "" || form.optional.budget_usd == null
-          ? null
-          : Number(form.optional.budget_usd),
-    },
-    available_acres:
-      form.available_acres === "" || form.available_acres == null
-        ? null
-        : Number(form.available_acres),
+    optional: {},
+    available_acres: blankToNull(farm.available_acres),
   };
+  const src = farm.optional ?? {};
+  for (const [key, convert] of Object.entries(OPTIONAL_KEYS))
+    if (key in src) out.optional[key] = convert(src[key]);
+  return out;
 }
+
+/** UI-only fields of a farm (anything outside the request contract). */
+export function uiFieldsOf(farm) {
+  return Object.fromEntries(
+    Object.entries(farm ?? {}).filter(([k]) => !REQUEST_KEYS.has(k)),
+  );
+}
+
+/** Form state to request body. Same function as toSimulateRequest. */
+export const requestFromForm = (form) => toSimulateRequest(form);
 export function validateFarm(farm) {
   const errors = [];
   const last = new Date().getFullYear() - 1;

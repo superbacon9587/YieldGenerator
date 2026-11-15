@@ -13,6 +13,7 @@ import {
   removeSetup,
   setupAcres,
   setupCrops,
+  setupFormFarm,
 } from "./savedSetups.js";
 import "./compare.css";
 
@@ -162,7 +163,7 @@ export default function ComparePage({ mock, onLoad }) {
                       {number(setupAcres(s.farm), 1)} acres · saved {savedDate(s.saved_at)}
                     </small>
                     <div className="setup-actions">
-                      <button className="text-button" onClick={() => onLoad(s.farm)}>
+                      <button className="text-button" onClick={() => onLoad(setupFormFarm(s))}>
                         <Upload size={13} /> Load
                       </button>
                       <button

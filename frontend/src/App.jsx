@@ -20,7 +20,7 @@ const OptimizePage = lazy(() => import("./features/optimize/OptimizePage.jsx"));
 import {
   DEFAULT_FARM,
   clone,
-  requestFromForm,
+  toSimulateRequest,
   validateFarm,
 } from "./domain.js";
 import { simulate, USE_MOCK, meta as fetchMeta } from "./api.js";
@@ -95,7 +95,7 @@ export default function App() {
     heading.current?.focus();
   }, [view]);
   async function run(source = farm) {
-    const request = requestFromForm(source);
+    const request = toSimulateRequest(source, meta);
     const errors = validateFarm(request);
     if (errors.length) {
       setError(errors.join(" "));
