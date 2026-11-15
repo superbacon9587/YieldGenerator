@@ -9,6 +9,7 @@ For every record in /api/simulate, /api/compare and /api/optimize responses:
 """
 
 import re
+from pathlib import Path
 
 import pytest
 
@@ -50,8 +51,25 @@ def simulated(request):
     return req, engine.simulate(req, wx=WX, context=ctx)
 
 
+ROOT = Path(__file__).resolve().parent.parent
+REPO_PREFIX = f"{calculations.REPO_URL}/blob/{calculations.BRANCH}/"
+HASH = re.compile(r"\b[0-9a-f]{40}\b")
+
+
+def assert_repo_link(url, where):
+    """Repo links point at an existing file on BRANCH, never at a commit hash."""
+    if not url or not url.startswith(calculations.REPO_URL):
+        return
+    assert not HASH.search(url), (where, url)
+    assert url.startswith(REPO_PREFIX), (where, url)
+    path = url.removeprefix(REPO_PREFIX).split("#")[0]
+    assert (ROOT / path).is_file(), (where, url)
+
+
 def check_record(rid, rec):
     assert rec["id"] == rid.removesuffix(" (lb)")
+    for i in rec["inputs"]:
+        assert_repo_link(i["source_url"], (rid, i["name"]))
     hand_check(rid, rec)
     if "lb" in rec:
         hand_check(rid + " (lb)", rec["lb"])
@@ -108,6 +126,25 @@ def test_values_match_the_numbers_the_response_shows(simulated):
                 else:
                     assert c[f"{key}.{field}"]["value"] == getattr(w, field)
                     assert c[f"{key}.{field}"]["lb"]["value"] == round(getattr(w, field) * 2000)
+
+
+def test_source_links_point_at_existing_files_on_main(simulated):
+    _, out = simulated
+    d = out.calculation_details
+    links = [d["model_source"], d["harvest_source"]]
+    for b in d["blocks"]:
+        links += b["sources"]
+        for y in b["yearly"]:
+            links += [v for v in y.values() if isinstance(v, dict) and "url" in v]
+    assert any(s["url"].startswith(calculations.REPO_URL) for s in links)
+    for s in links:
+        assert_repo_link(s["url"], s["label"])
+    assert d["model_revision"] == calculations.BRANCH
+    assert_repo_link("https://github.com/superbacon9587/YieldGenerator/blob/main/backend/simulate.py", "sanity")
+    with pytest.raises(AssertionError):
+        assert_repo_link(f"{calculations.REPO_URL}/blob/{'0b816eaf' * 5}/backend/simulate.py", "hash")
+    with pytest.raises(AssertionError):
+        assert_repo_link(f"{REPO_PREFIX}backend/missing.py", "missing")
 
 
 def test_reported_and_estimated_inputs_are_tagged():

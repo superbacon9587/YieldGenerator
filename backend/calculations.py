@@ -7,7 +7,6 @@ that NASA supplied production costs.
 from __future__ import annotations
 import csv
 import re
-import subprocess
 from functools import cache
 from pathlib import Path
 from statistics import mean, median
@@ -16,14 +15,13 @@ import numpy as np
 from backend import economics, reference, power_client, yield_weight
 
 ROOT = Path(__file__).resolve().parent.parent
-REPO = "https://github.com/superbacon9587/YieldGenerator"
+REPO_URL = "https://github.com/superbacon9587/YieldGenerator"
+BRANCH = "main"
 
-@cache
-def revision():
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, timeout=2).strip()
-    except (OSError, subprocess.SubprocessError):
-        return "main"
+
+def file_url(path):
+    """Link to a repo file on BRANCH. Never pinned to a commit hash."""
+    return f"{REPO_URL}/blob/{BRANCH}/{path}"
 
 @cache
 def records(path):
@@ -31,7 +29,7 @@ def records(path):
         return list(csv.DictReader(stream))
 
 def source(label, path, rows=None):
-    return {"label": label, "url": f"{REPO}/blob/{revision()}/{path}", "records": rows or []}
+    return {"label": label, "url": file_url(path), "records": rows or []}
 
 def matching_price(path, key, name, price):
     if price is None:
@@ -106,7 +104,7 @@ def build(bt, response, wx):
     totals = response.farm_totals
     financial = [r for r in totals if r.profit is not None]
     excluded = [{"block_id": b.id, "crop": b.crop, "years": [r.year for r in b.yearly if r.profit is None]} for b in response.blocks if any(r.profit is None for r in b.yearly)]
-    return {"version": 1, "model_revision": revision(), "data_revision": revision(), "price_mode": req.price_mode,
+    return {"version": 1, "model_revision": BRANCH, "data_revision": BRANCH, "price_mode": req.price_mode,
         "cost_basis": "Regional reference-study estimates plus modeled water cost. No farmer operating expenses were supplied. The budget is a spending limit, not an expense input.",
         "money_basis": "Revenue uses the same median-normalized harvest quantity as the harvest display; costs use a fixed regional study plus modeled water. Dollar results are modeled margins, not observed farm accounts.",
         "validation_status": "Model estimates; source tracing does not establish predictive accuracy. Crop coefficients marked verify=true and pump/water assumptions still require review.",
@@ -291,10 +289,6 @@ class Record:
 
 
 # ---------------------------------------------------------------- shared inputs
-
-def file_url(path):
-    return f"{REPO}/blob/{revision()}/{path}"
-
 
 def crop_name(crop):
     return CROP_NAMES.get(crop, crop.replace("_", " "))
@@ -940,9 +934,9 @@ def difference_records(plan_stats, current_stats, plan_calcs, current_calcs):
             continue
         rec = Record(f"difference.{key}", label, unit, d, "Plan average minus current farm average, per year",
                      ROUND_MONEY if money else f"Rounded to {10 ** -d:g} {unit}.")
-        pn = rec.inp("Plan average", p, unit, f"Plan backtest, summary_stats.{key}", file_url("backend/optimize.py"),
+        pn = rec.inp("Plan average", p, unit, "YieldGenerator model, backend/optimize.py", file_url("backend/optimize.py"),
                      "model", "Model estimate from the backtest", money=money)
-        cn = rec.inp("Current farm average", c, unit, f"Current farm backtest, summary_stats.{key}",
+        cn = rec.inp("Current farm average", c, unit, "YieldGenerator model, backend/optimize.py",
                      file_url("backend/optimize.py"), "model", "Model estimate from the backtest", money=money)
         rec.step("{0} - {1}", [pn, cn], "{0}-{1}", "" if money else unit, d, money)
         out[rec.id] = rec.out(rnd(p - c, d))
