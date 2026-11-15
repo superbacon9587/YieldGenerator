@@ -17,7 +17,7 @@ export default function HarvestCard({ result, relativeYield }) {
     <div className="metric harvest-metric">
       <span className="metric-label">
         Estimated harvest per year
-        <MetricInfo metric="harvest" label="average annual harvest" />
+        <MetricInfo metric="avg_harvest" label="average annual harvest" />
         <Wheat size={17} />
       </span>
       <strong>
@@ -30,9 +30,14 @@ export default function HarvestCard({ result, relativeYield }) {
         )}
       </strong>
       <small>
-        {relativeYield == null
-          ? "Percent of full yield not available"
-          : `${percent(relativeYield)} of full yield`}
+        {relativeYield == null ? (
+          "Percent of full yield not available"
+        ) : (
+          <>
+            {percent(relativeYield)} of full yield{" "}
+            <MetricInfo metric="full_yield" label="full yield reference" />
+          </>
+        )}
       </small>
     </div>
   );

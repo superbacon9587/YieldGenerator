@@ -48,4 +48,4 @@ Several coefficients remain explicitly marked verify=true in crops.json, irrigat
 
 ## Verification
 
-Tests cover harvest and revenue consistency, water-limit monotonicity with a fixed reference, expense sums and unit conversions, source years/season URLs, missing data and PDF-category reconciliation. Financial UI separates gains/losses, preserves missing entries and identifies rounding adjustments. Actual predictive accuracy still requires independent observed yield data and held-out-year validation.
+Tests cover harvest and revenue consistency, water-limit monotonicity with a fixed reference, expense sums and unit conversions, source years/season URLs, missing data and PDF-category reconciliation. The UI gives a one-line calculation for the selected metric and distinguishes weather inputs, repo references and model outputs. Full precision remains downloadable. Actual predictive accuracy still requires independent observed yield data and held-out-year validation.

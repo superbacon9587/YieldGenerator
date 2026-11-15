@@ -151,3 +151,49 @@
     display: none;
   }
 }
+.simple-calculation {
+  width: min(580px, calc(100vw - 24px));
+  height: auto;
+  max-height: 90dvh;
+  inset: 5dvh 12px auto auto;
+  padding: 24px;
+  border-radius: 14px;
+}
+.simple-calculation .calculation-header h2 {
+  font-size: 24px;
+  margin: 0;
+}
+.simple-origins {
+  margin: 18px 0;
+}
+.simple-origins div {
+  padding: 10px 0;
+  border-bottom: 1px solid #e0e6d9;
+}
+.simple-origins dt {
+  font-size: 12px;
+  color: #64755f;
+  font-weight: 600;
+}
+.simple-origins dd {
+  margin: 4px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.simple-sources {
+  margin: 16px 0;
+  font-size: 13px;
+}
+.simple-sources li {
+  padding: 5px 0;
+}
+.simple-crop-label {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 13px;
+}
+.simple-crop-label select {
+  padding: 8px;
+  max-width: 220px;
+}

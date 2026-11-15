@@ -18,13 +18,15 @@ function Card({ label, value, detail, icon: Icon }) {
         {label}
         <MetricInfo
           metric={
-            label.includes("margin")
-              ? "profit"
-              : label.includes("water")
-                ? "water"
-                : label.includes("relative")
-                  ? "relative"
-                  : "summary"
+            label.startsWith("Total")
+              ? "total_profit"
+              : label.includes("margin")
+                ? "avg_profit"
+                : label.includes("water")
+                  ? "avg_water"
+                  : label.includes("relative")
+                    ? "avg_relative"
+                    : "summary"
           }
           label={label}
         />
