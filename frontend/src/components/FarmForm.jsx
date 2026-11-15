@@ -9,23 +9,35 @@ import {
   Search,
   LoaderCircle,
 } from "lucide-react";
-import { CROPS, IRRIGATION, MONTHS, number, toAcres } from "../domain.js";
+import {
+  CROPS,
+  IRRIGATION,
+  MONTHS,
+  irrigationIssue,
+  irrigationsFor,
+  number,
+  toAcres,
+} from "../domain.js";
 import { geocode } from "../api.js";
 import Timeline from "./Timeline.jsx";
 import LandBudgetPanel from "../features/summary/LandBudgetPanel.jsx";
 import LandCheck from "../features/summary/LandCheck.jsx";
 import PeriodPresets from "../features/summary/PeriodPresets.jsx";
 
-function BlockEditor({ block, index, onChange, onRemove }) {
+function BlockEditor({ block, index, onChange, onRemove, meta }) {
   const [unit, setUnit] = useState("acres");
   const area = unit === "sqft" ? Number(block.acres) * 43560 : block.acres;
   function update(key, value) {
     onChange({ ...block, [key]: value });
   }
+  const priced = irrigationsFor(block.crop, meta);
+  const issue = irrigationIssue(block, meta);
   function selectCrop(crop) {
+    const ok = irrigationsFor(crop, meta);
     onChange({
       ...block,
       crop,
+      irrigation: ok.includes(block.irrigation) ? block.irrigation : (ok[0] ?? block.irrigation),
       ...(CROPS[crop].perennial
         ? { start_month: 1, end_month: 12 }
         : {
@@ -89,9 +101,14 @@ function BlockEditor({ block, index, onChange, onRemove }) {
           value={block.irrigation}
           onChange={(e) => update("irrigation", e.target.value)}
         >
-          {Object.entries(IRRIGATION).map(([key, name]) => (
+          {issue && (
+            <option value={block.irrigation} disabled>
+              {IRRIGATION[block.irrigation]} (no cost data)
+            </option>
+          )}
+          {priced.map((key) => (
             <option key={key} value={key}>
-              {name}
+              {IRRIGATION[key]}
             </option>
           ))}
         </select>
@@ -132,6 +149,11 @@ function BlockEditor({ block, index, onChange, onRemove }) {
       >
         <Trash2 size={17} />
       </button>
+      {issue && (
+        <p className="irrigation-issue" role="alert">
+          {issue}
+        </p>
+      )}
     </div>
   );
 }
@@ -326,6 +348,7 @@ export default function FarmForm({
                 key={block.id}
                 block={block}
                 index={index}
+                meta={meta}
                 onChange={(changed) =>
                   setFarm({
                     ...farm,

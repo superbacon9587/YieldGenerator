@@ -125,7 +125,8 @@ def meta() -> MetaResponse:
     last = power_client.default_end_date().year
     span = last - first + 1
     return MetaResponse(first_year=first, last_full_year=last,
-                        presets=[p for p in PERIOD_PRESETS if p <= span])
+                        presets=[p for p in PERIOD_PRESETS if p <= span],
+                        irrigation_by_crop=simulate_mod.irrigation_by_crop())
 
 
 @app.post("/api/compare", response_model=CompareResponse)

@@ -227,9 +227,9 @@ export function chartGuide(view) {
   const guides={
     yield:{columns:["harvest","yield"],formula:perAcre?harvest:`${harvest}; total harvest(year) = harvest per acre(year) × acres`,sources:"USDA NASS reference yields; NASA POWER weather and crop-model parameters for relative yield."},
     production:{columns:["harvest"],formula:`${harvest}; total harvest(year) = harvest per acre(year) × acres`,sources:"USDA NASS reference yields; NASA POWER weather and crop-model parameters."},
-    water:{columns:["water"],formula:"Applied water(year) = net irrigation need(year) ÷ irrigation efficiency × acres ÷ 304.8 (net need in mm; result in acre-feet)",sources:"NASA POWER weather, FAO-56 water balance, and stored soil, crop and irrigation assumptions."},
-    profit:{columns:["sales","cost","margin"],formula:"Operating margin(year) = sales(year) − operating cost(year)",sources:"USDA NASS yields and selling prices; UC Davis cost-study extracts; NASA POWER water modeling; EIA electricity references and water-price assumptions."},
-    cost:{columns:["water","cost"],formula:"Operating cost(year) = acres × non-water operating cost per acre + surface-water expense(year) + pumping electricity expense(year)",sources:"UC Davis operating-cost study extracts; modeled water use from NASA POWER; EIA electricity prices and stored surface-water/pumping assumptions."},
+    water:{columns:["water"],formula:"Applied water(year) = net irrigation applied(year) ÷ irrigation efficiency × acres ÷ 304.8 (net need in mm; result in acre-feet)",sources:"NASA POWER weather, FAO-56 water balance, and stored soil, crop and irrigation assumptions."},
+    profit:{columns:["sales","cost","margin"],formula:"Operating margin(year) = sales(year) − operating cost(year)",sources:"USDA NASS yields and selling prices; UC Davis/USDA ERS cost components and NASS expense indexes; NASA POWER water modeling; EIA fuel/electricity references and water-price assumptions."},
+    cost:{columns:["water","cost"],formula:"Operating cost(year) = indexed inputs(year) + harvest expense(year) + water expense(year) + annual irrigation-system cost(year)",sources:"UC Davis cost components or USDA ERS oats costs; USDA NASS expense indexes; EIA fuel/electricity prices; NASA POWER water use and stored pumping assumptions."},
   };
   const guide=guides[chart] ?? guides.yield;
   const notes=[];

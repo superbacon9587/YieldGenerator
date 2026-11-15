@@ -26,6 +26,52 @@ export const IRRIGATION = {
   sprinkler: "Sprinkler",
   flood: "Flood",
 };
+// Irrigation types with cost data for each crop: a UC Davis study (or, for oats, USDA ERS)
+// prices that irrigation system. Other crop and irrigation combinations are not offered.
+// GET /api/meta sends the live map (irrigation_by_crop); this copy is used without it, and
+// tests/test_cross_checks.py keeps the two equal.
+export const IRRIGATION_BY_CROP = {
+  alfalfa_hay: ["sprinkler", "flood"],
+  almonds: ["drip", "micro_sprinkler"],
+  corn: ["flood"],
+  oats: ["flood"],
+  processing_tomatoes: ["drip"],
+  walnuts: ["micro_sprinkler", "flood"],
+};
+
+/** "surface" (share 1), "well" (share 0) or "mix" for optional.surface_water_share. */
+export function waterSourceKind(share) {
+  const s = Number(share);
+  return s >= 1 ? "surface" : s <= 0 ? "well" : "mix";
+}
+
+/** The surface_water_share a water source button sets; Mix keeps a mixed share or starts 50/50. */
+export function waterSourceShare(kind, current = 0.5) {
+  if (kind === "surface") return 1;
+  if (kind === "well") return 0;
+  return current > 0 && current < 1 ? current : 0.5;
+}
+
+/** Irrigation keys with cost data for a crop, from /api/meta when it has them. */
+export function irrigationsFor(crop, meta) {
+  return meta?.irrigation_by_crop?.[crop] ?? IRRIGATION_BY_CROP[crop] ?? [];
+}
+
+/** Message for a crop and irrigation combination with no cost data, else null. */
+export function irrigationIssue(block, meta) {
+  if (!CROPS[block?.crop] || !IRRIGATION[block?.irrigation]) return null;
+  const ok = irrigationsFor(block.crop, meta);
+  if (ok.includes(block.irrigation)) return null;
+  const irrigation = IRRIGATION[block.irrigation].toLowerCase();
+  const crop = CROPS[block.crop].name.toLowerCase();
+  const choose = ok.map((k) => IRRIGATION[k].toLowerCase()).join(" or ");
+  return (
+    `No cost data for ${irrigation} irrigation on ${crop}: no cost study prices that system, ` +
+    `so this entry would have no cost or profit.` +
+    (choose ? ` Choose ${choose}.` : "")
+  );
+}
+
 export const DEFAULT_FARM = {
   location: { lat: 37.3, lon: -120.48, label: "Merced, California" },
   years: [2000, 2024],
@@ -43,7 +89,7 @@ export const DEFAULT_FARM = {
       id: "b2",
       crop: "oats",
       acres: 15,
-      irrigation: "sprinkler",
+      irrigation: "flood",
       start_month: 11,
       end_month: 4,
     },
@@ -180,7 +226,7 @@ export function uiFieldsOf(farm) {
 
 /** Form state to request body. Same function as toSimulateRequest. */
 export const requestFromForm = (form) => toSimulateRequest(form);
-export function validateFarm(farm) {
+export function validateFarm(farm, meta) {
   const errors = [];
   const last = new Date().getFullYear() - 1;
   if (
@@ -220,6 +266,10 @@ export function validateFarm(farm) {
       errors.push(
         `Check crop ${i + 1}: select a crop and irrigation, enter a positive area, and choose valid months.`,
       );
+  });
+  farm.blocks.forEach((b, i) => {
+    const issue = irrigationIssue(b, meta);
+    if (issue) errors.push(`Crop ${i + 1}: ${issue}`);
   });
   for (const key of ["water_available_af", "water_applied_af"])
     if (
@@ -301,7 +351,10 @@ export function scenarioFarm(
 ) {
   const farm = clone(baseline);
   if (type === "drip")
-    farm.blocks = farm.blocks.map((b) => ({ ...b, irrigation: "drip" }));
+    // Only entries with drip cost data switch; the others keep their irrigation.
+    farm.blocks = farm.blocks.map((b) =>
+      irrigationsFor(b.crop).includes("drip") ? { ...b, irrigation: "drip" } : b,
+    );
   else if (type === "water")
     farm.optional.water_available_af =
       0.75 * (summaryMetrics(baselineResult).water ?? 0);

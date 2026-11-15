@@ -74,7 +74,7 @@ function Popover({ record, display, close }) {
       <details className="calc-working" open><summary>Calculation steps</summary>
         <ol className="calc-steps">{record.steps.map((step,index) => <li key={index}>{compactStep(step,index,record.steps.length)}</li>)}</ol>
       </details>
-      <p className="calc-rounding"><strong>Data sources:</strong> The table uses the original source references (NASA POWER weather, USDA/EIA records and UC Davis studies), plus farmer inputs and model assumptions. Reference links are grouped below.</p>
+      <p className="calc-rounding"><strong>Data sources:</strong> The table uses the original source references (NASA POWER weather, USDA NASS/ERS and EIA records, and UC Davis studies), plus farmer inputs and model assumptions. Reference links are grouped below.</p>
       <div className="calc-formulas" aria-label="Equations">
         {tableEquations(record).map(equation => <p className="calc-formula" key={equation}>{equation}</p>)}
         <p className="calc-formula">{formulaEquation(record)}</p>

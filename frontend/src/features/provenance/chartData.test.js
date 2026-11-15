@@ -183,3 +183,25 @@ test("graph-specific columns change presentation without changing values", async
   assert.ok(guide.sources.length);
  }
 });
+
+test("for every year, the table row equals the chart row for cost, sales, margin, water and yield", () => {
+  const byBlock = new Map(sample.blocks.map((b) => [b.id, b]));
+  for (const view of views().filter((v) => !v.perAcre)) {
+    const data = getChartRows(sample, view);
+    const cells = tableCells(data);
+    data.rows.forEach((row, i) => {
+      for (const m of ["cost", "sales", "margin", "water", "yield"]) {
+        assert.equal(cells.rows[i][m], formatCell(m, row[m], view), `${label(view)} ${row.year} ${m}`);
+      }
+      // The chart row is the response's own number for that year (whole dollars, 0.1 acre-ft).
+      const src =
+        view.scope === "farm"
+          ? sample.farm_totals.find((t) => t.year === row.year)
+          : byBlock.get(view.scope).yearly.find((r) => r.year === row.year);
+      assert.equal(row.cost, src.cost ?? null, `${label(view)} ${row.year} cost`);
+      assert.equal(row.sales, src.revenue ?? null, `${label(view)} ${row.year} sales`);
+      assert.equal(row.margin, src.cost == null || src.revenue == null ? null : src.revenue - src.cost);
+      assert.equal(row.water, rnd(src.water_applied_af, 1), `${label(view)} ${row.year} water`);
+    });
+  }
+});

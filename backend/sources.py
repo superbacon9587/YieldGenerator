@@ -47,10 +47,11 @@ NASS_NAMES = {"almonds": "almond", "walnuts": "English walnut", "processing_toma
               "corn": "corn grain", "oats": "oat", "alfalfa_hay": "alfalfa hay"}
 COUNTY_YIELDS = "data/validation/ca_county_yields.csv"
 STATE_YIELDS = "data/validation/ca_state_yields.csv"
-COSTS = "data/reference/prices/production_costs.csv"
 PRICES = "data/reference/prices/crop_prices.csv"
-UTILITIES = "data/reference/prices/utilities.csv"
-ELECTRICITY_SERIES = "electricity_commercial"
+COST_INDEXES = "data/prices/cost_indexes.csv"
+INDEX_NAMES = {"fertilizer": "fertilizer", "chemicals": "agricultural chemicals", "seeds": "seeds and plants",
+               "fuels": "fuels", "wages": "farm wage rates", "diesel": "US No 2 diesel retail price",
+               "electricity": "California commercial electricity price"}
 
 
 class Src:
@@ -140,26 +141,24 @@ def baseline(crop, ctx):
                ["USDA NASS yield"], verified=False)
 
 
-def cost(crop, ctx):
-    """UC Davis cost study row behind the production cost, with region, year and page."""
-    c = ctx["production_costs"][crop]
-    row = next((r for r in records(COSTS) if r["crop"] == crop and r["region"] == c["region"]
-                and r["cost_excl_water"] and float(r["cost_excl_water"]) == c["cost_excl_water"]), None)
-    if row is None:
-        return Src(f"{UNVERIFIED}: no UC Davis cost study row matches this cost", ["ucd"],
-                   ["UC Davis cost study"], verified=False)
-    page = re.search(r"p\.\s?\d+", row["source"])
-    file_year = re.search(r"(20[0-9]{2})\.pdf", row["source"])
-    text = f"UC Davis Cost and Return Study, {crop_name(crop)}, {row['region']}, {row['study_year']}"
+def cost_study(crop, ctx):
+    """The cost study behind a crop's cost components (the rows block_cost uses): the UC
+    Davis study's region, year and page with its link, or the USDA ERS national average."""
+    from backend.simulate import cost_components
+    comps = cost_components(crop, ctx) or []
+    c = next((x for x in comps if x.basis in ("per_acre", "per_ton")), None)
+    if c is None:
+        return None
+    if c.source.startswith(ERS_LABEL):
+        return Src(f"{ERS_LABEL}, {crop_name(crop).lower()}, U.S. total (no California study)",
+                   [(ERS_LABEL, c.source_url)], [f"{ERS_LABEL}, {crop_name(crop).lower()}"])
+    page = re.search(r"p\.\s?\d+", c.source)
+    text = f"UC Davis Cost and Return Study, {crop_name(crop)}, {c.region}, {c.base_year}"
     text += f", {page.group(0)}" if page else ""
-    text += ". Study-year dollars, not adjusted for inflation."
-    if ctx.get("cost_region") and ctx["cost_region"] != row["region"]:
-        text += f" Used because {ctx['cost_region']} has no {crop_name(crop).lower()} study."
-    ok = bool(page)
-    if file_year and file_year.group(1) != row["study_year"]:
-        ok = False
-        text += f" The study year ({row['study_year']}) and the cited file ({file_year.group(1)}) disagree."
-    return Src(text, ["ucd"], [f"UC Davis cost study, {crop_name(crop)}, {row['region']}, {row['study_year']}"], ok, year=int(row["study_year"]))
+    if ctx.get("cost_region") and ctx["cost_region"] != c.region:
+        text += f" (used because {ctx['cost_region']} has no {crop_name(crop).lower()} study)"
+    return Src(text, [("UC Davis cost study", c.source_url), "ucd"],
+               [f"UC Davis cost study, {crop_name(crop)}, {c.region}, {c.base_year}"], bool(page and c.source_url), year=c.base_year)
 
 
 def price(crop, p):
@@ -172,13 +171,77 @@ def price(crop, p):
                f"{p.year} {year_kind}", ["nass"], [f"USDA NASS California price received, {p.year}"], year=p.year)
 
 
-def electricity(e):
-    rows = [r for r in records(UTILITIES) if r["type"] == ELECTRICITY_SERIES and int(r["year"]) == e.year]
+def cost_index(v):
+    """A NASS prices-paid index or EIA price (economics.IndexValue) from cost_indexes.csv."""
+    rows = [r for r in records(COST_INDEXES) if r["index_name"] == v.name and int(r["year"]) == v.year]
+    what = INDEX_NAMES.get(v.name, v.name)
     if not rows:
-        return Src(f"{UNVERIFIED}: no U.S. EIA electricity record for {e.year}", ["eia"],
-                   ["U.S. EIA electricity price"], verified=False)
-    return Src(f"U.S. EIA, California average commercial electricity price, {e.year}", ["eia"],
-               [f"U.S. EIA California commercial electricity price, {e.year}"], year=e.year)
+        return Src(f"{UNVERIFIED}: no {what} record for {v.year}", ["nass"], [f"{what}, {v.year}"], verified=False)
+    if rows[0]["source"].startswith("USDA NASS"):
+        publisher = "USDA NASS Quick Stats"
+        text = f"USDA NASS Prices Paid Index (2011=100), {what}, U.S. annual, {v.year}"
+    else:
+        publisher = "U.S. EIA"
+        text = f"U.S. EIA, {what}, {v.year}"
+    if v.is_estimate:
+        text += f" (no value for {v.wanted_year}; nearest year used)"
+    return Src(text, [(publisher, rows[0]["source_url"])], [f"{publisher} {what}, {v.year}"], year=v.year)
+
+
+def electricity(e):
+    return cost_index(e)
+
+
+SIMULATION = "YieldGenerator simulation using NASA POWER weather"
+
+
+def simulation(derived_from=(), verified=True):
+    """A simulated quantity (acre-ft applied, harvest tons) for one season."""
+    return Src(SIMULATION, ["nasa"], list(derived_from), verified)
+
+
+def no_harvest_line(crop, c):
+    """Why a crop's cost source has no separate per-ton harvest charge."""
+    if c is not None and c.source.startswith(ERS_LABEL):
+        return Src(f"{ERS_LABEL}, {crop_name(crop).lower()}, U.S. total, {c.base_year}: harvest is inside the "
+                   "machinery, fuel, repairs and custom services lines, so there is no separate harvest charge.",
+                   [(ERS_LABEL, c.source_url)], [f"{ERS_LABEL}, {crop_name(crop).lower()}"])
+    if c is None or not c.source_url:
+        return Src(f"{UNVERIFIED}: no cost study row for {crop_name(crop).lower()}", ["ucd"],
+                   ["UC Davis cost study"], verified=False)
+    page = re.search(r"p\.\s?\d+", c.source)
+    return Src(f"UC Davis Cost and Return Study, {crop_name(crop)}, {c.region}, {c.base_year}"
+               + (f", {page.group(0)}" if page else "")
+               + ": no custom harvest line; the grower's own harvest work is in the machinery and labor costs.",
+               [("UC Davis cost study", c.source_url), "ucd"],
+               [f"UC Davis cost study, {crop_name(crop)}, {c.region}, {c.base_year}"], bool(page))
+
+
+ERS_LABEL = "USDA ERS Commodity Costs and Returns"
+
+
+def cost_component(crop, c):
+    """One cost_components.csv row (economics.CostComponent): a UC Davis study line, or a
+    USDA ERS national average for a crop with no UC Davis study."""
+    if c.source.startswith(ERS_LABEL):
+        text = f"{ERS_LABEL}, {crop_name(crop).lower()}, U.S. total, {c.base_year}"
+        if c.basis == "per_acre_system":
+            text += ": irrigation system. " + c.source.split(": ", 1)[1]
+        else:
+            text += f", dollars per planted acre: {c.source.split('planted acre: ', 1)[-1]}."
+        return Src(text, [(ERS_LABEL, c.source_url)], [f"{ERS_LABEL}, {crop_name(crop).lower()}, {c.base_year}"], year=c.base_year)
+    if not c.source_url:
+        return Src(f"{UNVERIFIED}: no UC Davis cost component record for {crop_name(crop).lower()}", ["ucd"],
+                   ["UC Davis cost study"], verified=False)
+    page = re.search(r"p\.\s?\d+", c.source)
+    year = f", {c.base_year}" if c.base_year else ""
+    text = f"UC Davis Cost and Return Study, {crop_name(crop)}, {c.region}{year}"
+    text += f", {page.group(0)}" if page else ""
+    text += f": {c.component.replace('_', ' ')}"
+    if c.component == "other" and "includes " in c.source:
+        text += f" ({c.source.split('includes ', 1)[1]})"
+    return Src(text + ".", [("UC Davis cost study", c.source_url), "ucd"],
+               [f"UC Davis cost study, {crop_name(crop)}, {c.region}{year}"], bool(page), year=c.base_year)
 
 
 def water_price(ctx):
@@ -204,6 +267,23 @@ def water_price(ctx):
 
 
 # ---------------------------------------------------------------- defaults
+
+def soil_wetness(grid, day):
+    """NASA POWER GWETPROF on the planting day."""
+    return Src(f"NASA POWER GWETPROF (profile soil wetness, fraction of pore space filled), daily, grid cell "
+               f"{grid[0]:g}, {grid[1]:g}, {day}", ["nasa"], [f"NASA POWER GWETPROF, {day}"])
+
+
+def soil_property(texture, key):
+    entry = defaults_soils()[texture][key]
+    return Src(entry["source"], ["fao56"] if "FAO-56" in entry["source"] else [], [entry["source"]],
+               not entry.get("verify"))
+
+
+def defaults_soils():
+    from backend.reference import soils
+    return soils()
+
 
 def surface_share_default(share):
     return Src(f"Default assumption: {pct(share)} of water from surface water, the rest pumped from wells. "
@@ -234,7 +314,8 @@ MM_PER_IN = Src("Definition of the inch: 25.4 mm")
 MM_PER_FT = Src("Definition of the foot: 304.8 mm")
 CENTS = Src("Definition of the cent: 100 cents per dollar")
 PERCENT = Src("Fraction x 100 = percent")
-KWH = Src("Physics: lifting 1 acre-ft of water 1 ft takes about 1.02 kWh at 100% pump efficiency")
+KWH = Src("Physics: lifting 1 acre-ft of water 1 ft takes 1.024 kWh at 100% pump efficiency "
+          "(1,233.5 cubic meters x 9.81 m/s2 x 0.3048 m / 3.6 million joules per kWh)")
 
 
 def bushel(crop, lb):
@@ -279,8 +360,9 @@ def net_irrigation(crop, grid, start, end, texture, capped):
     holds, soil_ok = soil(texture)
     _, kc_ok = crop_field(crop, "kc")
     text = (f"Crop water use minus effective rain (both calculated from NASA POWER weather, grid cell {grid[0]:g}, "
-            f"{grid[1]:g}, {start} to {end}), refilling the root zone whenever it dries past half of what the soil "
-            f"holds (FAO-56 soil water balance, chapter 8; {holds}).")
+            f"{grid[1]:g}, {start} to {end}), starting from the soil water on the planting day (NASA POWER "
+            f"GWETPROF), refilling the root zone whenever it dries past half of what the soil holds, and refilling "
+            f"the deficit left at the end of the season (FAO-56 soil water balance, chapter 8; {holds}).")
     if capped:
         text += " Limited by the farm water cap you entered."
     return Src(text, ["nasa", "fao56"],
@@ -370,10 +452,10 @@ class Farm:
     def costs(self, scope):
         parts, ok = [], True
         for crop in self.crops(scope):
-            if crop in self.ctx.get("production_costs", {}):
-                s = cost(crop, self.ctx)
+            s = cost_study(crop, self.ctx)
+            if s is not None:
                 ok = ok and s.verified
-                parts.append(f"{crop_name(crop)}: {s.text.split('. ')[0]}")
+                parts.append(f"{crop_name(crop)}: {s.text}")
         return "; ".join(parts), ok
 
     def ry_ok(self, scope):
@@ -399,13 +481,18 @@ class Farm:
     def cost(self, scope=None):
         studies, ok = self.costs(scope)
         water = water_price(self.ctx)
-        return Src(f"Calculated each year: production cost per acre from UC Davis Cost and Return Studies ({studies}) "
-                   f"times acres, plus water applied (FAO-56 water balance on {self.where}) priced at {water.text.rstrip('.')} "
-                   "for surface water and at the U.S. EIA California commercial electricity price for well pumping. "
-                   "Study-year dollars, not adjusted for inflation.",
-                   ["ucd", "nasa", "fao56", "eia"] + water.links,
-                   ["UC Davis cost studies", "Water applied (FAO-56, NASA POWER)", "Surface water price",
-                    "U.S. EIA electricity price"], ok and water.verified)
+        years = {"current": "the latest year's input prices, applied to every year",
+                 "historical": "that year's input prices (nearest year when missing)"}.get(self.price_mode, "")
+        return Src(f"Calculated each year as inputs + harvest + water + irrigation system. Inputs, harvest and "
+                   f"irrigation system come from the cost studies ({studies}), scaled to {years} by the USDA NASS "
+                   f"Prices Paid Index (2011=100) and the U.S. EIA diesel price, times acres (harvest times "
+                   f"simulated tons). Water is the acre-ft applied (YieldGenerator simulation using NASA POWER "
+                   f"weather, {self.where}) priced at {water.text.rstrip('.')} for surface water and at the U.S. "
+                   "EIA California commercial electricity price for well pumping.",
+                   ["ucd", "nass", "nasa", "fao56", "eia"] + water.links,
+                   ["UC Davis cost studies", "USDA NASS prices-paid indexes", "U.S. EIA diesel price",
+                    "Water applied (FAO-56, NASA POWER)", "Surface water price", "U.S. EIA electricity price"],
+                   ok and water.verified)
 
     def margin(self, scope=None):
         s, c = self.sales(scope), self.cost(scope)

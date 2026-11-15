@@ -96,7 +96,7 @@ export default function App() {
   }, [view]);
   async function run(source = farm) {
     const request = toSimulateRequest(source, meta);
-    const errors = validateFarm(request);
+    const errors = validateFarm(request, meta);
     if (errors.length) {
       setError(errors.join(" "));
       return;

@@ -1907,3 +1907,27 @@ thead th {
     padding: 10px;
   }
 }
+
+.crop-editor .irrigation-issue {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: #fdf1e7;
+  color: #8a3b12;
+  font-size: 0.85rem;
+}
+
+.water-source {
+  border: 0;
+  padding: 0;
+  margin: 12px 0 0;
+}
+.water-source legend {
+  font-weight: 600;
+  margin-bottom: 6px;
+}
+.water-source label {
+  display: block;
+  margin-top: 8px;
+}

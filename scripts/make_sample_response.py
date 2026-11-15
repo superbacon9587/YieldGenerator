@@ -28,7 +28,7 @@ REQUEST = {
         {"id": "b1", "crop": "almonds", "acres": 40, "irrigation": "drip", "start_month": 1, "end_month": 12},
         {"id": "b2", "crop": "processing_tomatoes", "acres": 80.5, "irrigation": "drip", "start_month": 4, "end_month": 9},
         {"id": "b3", "crop": "corn", "acres": 15, "irrigation": "flood", "start_month": 5, "end_month": 9},
-        {"id": "b4", "crop": "oats", "acres": 12, "irrigation": "sprinkler", "start_month": 11, "end_month": 4},
+        {"id": "b4", "crop": "oats", "acres": 12, "irrigation": "flood", "start_month": 11, "end_month": 4},
     ],
     "optional": {"soil": "loam", "surface_water_share": 0.35, "budget_usd": 450000},
 }
@@ -46,6 +46,6 @@ if __name__ == "__main__":
     data.pop("comparisons")
     data.pop("calculation_details")
     data["calculations"] = {k: v for k, v in data["calculations"].items()
-                            if k.startswith(("summary.", "table.")) or k.endswith(".profit")}
+                            if k.startswith(("summary.", "table.")) or k.endswith((".profit", ".cost"))}
     OUT.write_text(json.dumps(data, separators=(",", ":")))
     print(f"Wrote {OUT.relative_to(ROOT)} ({OUT.stat().st_size // 1000} KB)")

@@ -291,3 +291,28 @@
 .chart-guide { margin:12px 0; padding:12px 16px; border-left:3px solid #82976b; background:#f3f5ee; border-radius:4px; font-size:13px; line-height:1.6; }
 .chart-guide p { margin:4px 0; }
 .chart-guide a { color:#315f43; text-decoration:underline; }
+
+.calc-parts {
+  border-collapse: collapse;
+  margin: 0 0 12px;
+  min-width: 260px;
+}
+.calc-parts caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 4px;
+}
+.calc-parts th,
+.calc-parts td {
+  padding: 3px 10px 3px 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+}
+.calc-parts td {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+.calc-parts-total th,
+.calc-parts-total td {
+  font-weight: 700;
+  border-bottom: none;
+}
