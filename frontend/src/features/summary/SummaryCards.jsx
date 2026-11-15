@@ -34,10 +34,7 @@ export default function SummaryCards({ result }) {
   const years = s.years_count;
   return (
     <div className="metrics-grid summary-grid">
-      <HarvestCard
-        result={{ summary_stats: s }}
-        relativeYield={s.avg_relative_yield}
-      />
+      <HarvestCard result={result} relativeYield={s.avg_relative_yield} />
       <Card
         label="Total estimated margin"
         id="summary.total_profit"

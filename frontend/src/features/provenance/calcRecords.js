@@ -43,6 +43,8 @@ export function formatRecordValue(record) {
 export function inWeightUnit(record, weightUnit) {
   if (!record || weightUnit !== "lb" || !WEIGHT_UNITS.has(record.unit) || !finite(record.value))
     return record;
+  // The backend builds weight records in pounds from the same table rows.
+  if (record.lb) return record.lb;
   const unit = record.unit === "tons" ? "lb" : "lb/acre";
   const value = Math.round(record.value * LB_PER_TON);
   return {
@@ -50,12 +52,28 @@ export function inWeightUnit(record, weightUnit) {
     unit,
     value,
     decimals: 0,
+    rounding: `${record.rounding ?? ""} Pounds to the nearest lb.`.trim(),
     steps: [
       ...record.steps,
       {
         text: `${plain(record.value, 4)} ${record.unit} x 2,000 lb/ton = ${plain(value, 0)} ${unit}`,
         expr: `${record.value}*2000`,
         result: value,
+        round: 0,
+      },
+    ],
+    inputs: [
+      ...record.inputs,
+      {
+        name: "Pounds per ton",
+        value: LB_PER_TON,
+        unit: "lb/ton",
+        source: "US short ton",
+        source_url: null,
+        kind: "constant",
+        is_estimate: false,
+        estimate_reason: null,
+        not_estimate_reason: "Unit conversion",
       },
     ],
   };
@@ -88,12 +106,14 @@ export function differenceRecord(changed, original, label) {
     unit: unit === "%" ? "pp" : unit,
     decimals: d,
     formula_text: "Changed scenario value minus original farm value",
+    rounding: "Same rounding as the two values it subtracts.",
     is_estimate: isEstimated(changed) || isEstimated(original),
     steps: [
       {
         text: `${show(changed)} - ${show(original)} = ${fmtDelta(value, unit, d)}`,
         expr: `${changed.value}-${original.value}`,
         result: value,
+        round: d,
       },
     ],
     inputs: [

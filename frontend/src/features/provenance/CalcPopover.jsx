@@ -109,6 +109,7 @@ function Popover({ record, display, close }) {
           ))}
         </tbody>
       </table>
+      {record.rounding && <p className="calc-rounding">{record.rounding}</p>}
     </dialog>
   );
 }

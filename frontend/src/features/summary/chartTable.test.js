@@ -1,9 +1,11 @@
+// Table rows for small hand-made responses (moved to the shared selector, chartData.js).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { averageRow, tableRecordId, tableRows } from "./chartTable.js";
+import { getChartRows, tableRecordId } from "../provenance/chartData.js";
 
 const result = {
   years: [2014, 2015],
+  summary: { drought_years: [2014] },
   blocks: [
     {
       id: "a",
@@ -33,32 +35,40 @@ const result = {
     { block_id: "o", yearly: [{ year: 2014, tons: null, tons_per_acre: null }, { year: 2015, tons: null, tons_per_acre: null }] },
   ],
 };
+const rows = (scope, perAcre = false, unit = "tons") =>
+  getChartRows(result, { chart: "yield", scope, perAcre, unit });
 
 test("farm totals add known harvest and keep missing money as null, not zero", () => {
-  const rows = tableRows(result, "farm", false);
-  assert.deepEqual(rows.map((r) => r.harvest), [40, 36]);
-  assert.deepEqual(rows.map((r) => r.margin), [20000, 5000]);
-  assert.equal(rows[0].marginPct, 20);
-  assert.equal(rows[0].yield, 92);
-  const avg = averageRow(rows);
-  assert.equal(avg.harvest, 38);
-  assert.equal(avg.sales, 95000);
-  assert.equal(avg.margin, 12500);
-  assert.ok(Math.abs(avg.marginPct - (100 * 12500) / 95000) < 1e-9);
+  const { rows: r, average } = rows("farm");
+  assert.deepEqual(r.map((x) => x.harvest), [40, 36]);
+  assert.deepEqual(r.map((x) => x.margin), [20000, 5000]);
+  assert.equal(r[0].marginPct, 20);
+  assert.equal(r[0].yield, 92);
+  assert.equal(r[0].drought, true);
+  assert.equal(average.harvest, 38);
+  assert.equal(average.sales, 95000);
+  assert.equal(average.margin, 12500);
+  assert.equal(average.marginPct, 13.2);
 });
 
 test("farm per acre divides by the acres each column covers", () => {
-  const rows = tableRows(result, "farm", true);
-  assert.equal(rows[0].harvest, 1); // only almonds have harvest weight
-  assert.equal(rows[0].sales, 2500); // only almonds have money
-  assert.equal(rows[0].water, 130 / 50); // water covers both entries
+  const r = rows("farm", true).rows;
+  assert.equal(r[0].harvest, 1); // only almonds have harvest weight
+  assert.equal(r[0].sales, 2500); // only almonds have money
+  assert.equal(r[0].water, 2.6); // 130 acre-ft over both entries, to 0.01
 });
 
-test("one crop shows that crop's rows; per acre uses tons per acre", () => {
-  const rows = tableRows(result, "o", false);
-  assert.deepEqual(rows.map((r) => r.sales), [null, null]);
-  assert.equal(averageRow(rows).sales, null);
-  assert.deepEqual(tableRows(result, "a", true).map((r) => r.harvest), [1, 0.9]);
-  assert.equal(tableRows(result, "a", true)[1].water, 2.5);
-  assert.equal(tableRecordId("a", true, "margin_pct"), "table.a.per_acre.margin_pct");
+test("one crop shows that crop's rows; per acre uses tons per acre; pounds convert exactly", () => {
+  assert.deepEqual(rows("o").rows.map((x) => x.sales), [null, null]);
+  assert.equal(rows("o").average.sales, null);
+  assert.deepEqual(rows("a", true).rows.map((x) => x.harvest), [1, 0.9]);
+  assert.deepEqual(rows("a", true, "lb").rows.map((x) => x.harvest), [2000, 1800]);
+  assert.equal(rows("a", true).rows[1].water, 2.5);
+  assert.equal(tableRecordId("a", true, "marginPct"), "table.a.per_acre.margin_pct");
+});
+
+test("the whole-farm yield chart stacks crops so the bar top is the table value", () => {
+  const data = rows("farm");
+  assert.deepEqual(data.series.map((s) => s.key), ["harvest_a"]);
+  assert.equal(data.rows[0].harvest_a, 40);
 });

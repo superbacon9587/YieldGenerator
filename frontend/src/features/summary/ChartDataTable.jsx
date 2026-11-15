@@ -1,101 +1,32 @@
 import { useState } from "react";
 import { CalcInfo } from "../provenance/CalcPopover.jsx";
-import { useYieldUnit } from "../yield/YieldUnitContext.jsx";
-import { formatWeightNumber, unitLabel } from "../yield/yieldUnits.js";
-import { averageRow, tableRecordId, tableRows } from "./chartTable.js";
+import { tableCells, tableHeaders, tableRecordId } from "../provenance/chartData.js";
 
-const finite = (v) => typeof v === "number" && Number.isFinite(v);
-const NA = "Not available";
-const dollars = (v) =>
-  finite(v)
-    ? `${v < 0 ? "-" : ""}$${Math.abs(v).toLocaleString("en-US", { maximumFractionDigits: 0 })}`
-    : NA;
-const fixed = (v, d) =>
-  finite(v)
-    ? v.toLocaleString("en-US", { maximumFractionDigits: d, minimumFractionDigits: d })
-    : NA;
+const COLUMNS = ["harvest", "sales", "cost", "margin", "water", "yield"];
 
 /**
- * Year by year numbers behind the chart above it: Year, Harvest, Sales, Cost,
- * Margin, Water, Yield, plus a bold Average row whose cells open their calculation.
+ * The numbers behind the chart above it. `data` is the same getChartRows() result
+ * the chart plots, so every cell is the bar it sits under; this component only
+ * prints it. Average row cells open their calculation record.
  */
-export default function ChartDataTable({ result, scope = "farm", perAcre = false, title }) {
+export default function ChartDataTable({ data, title }) {
   const [shown, setShown] = useState(true);
-  const { unit } = useYieldUnit();
-  const rows = tableRows(result, scope, perAcre);
-  if (!rows.length) return null;
-  const records = result.calculations ?? {};
-  const local = averageRow(rows);
-  const recordValue = (metric) => records[tableRecordId(scope, perAcre, metric)]?.value;
-  // Average cells show the backend record value when present, so the cell and its popover agree.
-  const avg = Object.fromEntries(
-    Object.keys(local).map((m) => {
-      const v = recordValue(m === "marginPct" ? "margin_pct" : m);
-      return [m, finite(v) ? v : local[m]];
-    }),
-  );
-  const drought = new Set(result.summary?.drought_years ?? []);
-  const perText = perAcre ? "/acre" : "";
-  const fmt = {
-    harvest: (v) => (finite(v) ? formatWeightNumber(v, unit, perAcre) : NA),
-    sales: dollars,
-    cost: dollars,
-    margin: dollars,
-    water: (v) => fixed(v, perAcre ? 2 : 1),
-    yield: (v) => (finite(v) ? `${fixed(v, 1)}%` : NA),
-    marginPct: (v) => (finite(v) ? `${fixed(v, 1)}%` : ""),
-  };
-  const cell = (m, v, average) => (
-    <td>
-      {fmt[m](v)}
-      {average && finite(v) && (
-        <CalcInfo
-          id={tableRecordId(scope, perAcre, m)}
-          display={m === "harvest" ? `${fmt.harvest(v)} ${unitLabel(unit, perAcre)}` : fmt[m](v)}
-        />
-      )}
-    </td>
-  );
-  const marginCell = (r, average) => (
-    <td>
-      {fmt.margin(r.margin)}
-      {average && finite(r.margin) && (
-        <CalcInfo id={tableRecordId(scope, perAcre, "margin")} display={fmt.margin(r.margin)} />
-      )}
-      {finite(r.marginPct) && (
-        <small className="table-pct">
-          {fmt.marginPct(r.marginPct)}
-          {average && (
-            <CalcInfo
-              id={tableRecordId(scope, perAcre, "margin_pct")}
-              display={fmt.marginPct(r.marginPct)}
-            />
-          )}
-        </small>
-      )}
-    </td>
-  );
-  const row = (r, average = false) => (
-    <tr
-      key={average ? "average" : r.year}
-      className={average ? "average-row" : drought.has(r.year) ? "drought-row" : ""}
-    >
-      <th scope="row">{average ? "Average" : r.year}</th>
-      {cell("harvest", r.harvest, average)}
-      {cell("sales", r.sales, average)}
-      {cell("cost", r.cost, average)}
-      {marginCell(r, average)}
-      {cell("water", r.water, average)}
-      {cell("yield", r.yield, average)}
-    </tr>
-  );
+  if (!data?.rows.length) return null;
+  const { scope, perAcre } = data.view;
+  const head = tableHeaders(data.view);
+  const cells = tableCells(data);
+  const anyDrought = data.rows.some((r) => r.drought);
+  const info = (metric, text) =>
+    text && text !== "Not available" ? (
+      <CalcInfo id={tableRecordId(scope, perAcre, metric)} display={text} />
+    ) : null;
   return (
     <div className="chart-data">
       <div className="chart-data-head">
         <span className="caption">
           {title}
           {perAcre ? ", per acre" : ", totals"}
-          {drought.size > 0 && shown ? ". Shaded rows are drought years." : ""}
+          {anyDrought && shown ? ". Shaded rows are drought years." : ""}
         </span>
         <button
           type="button"
@@ -111,18 +42,39 @@ export default function ChartDataTable({ result, scope = "farm", perAcre = false
           <table className="data-table">
             <thead>
               <tr>
-                <th>Year</th>
-                <th>Harvest ({unitLabel(unit, perAcre)})</th>
-                <th>Sales{perAcre ? " ($/acre)" : ""}</th>
-                <th>Cost{perAcre ? " ($/acre)" : ""}</th>
-                <th>Margin{perAcre ? " ($/acre)" : ""}</th>
-                <th>Water (acre-ft{perText})</th>
-                <th>Yield (% of potential)</th>
+                <th>{head.year}</th>
+                {COLUMNS.map((c) => (
+                  <th key={c}>{head[c]}</th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => row(r))}
-              {row({ ...avg }, true)}
+              {cells.rows.map((r, i) => (
+                <tr key={r.year} className={data.rows[i].drought ? "drought-row" : ""}>
+                  <th scope="row">{r.year}</th>
+                  {COLUMNS.map((c) => (
+                    <td key={c}>
+                      {r[c]}
+                      {c === "margin" && r.marginPct && <small className="table-pct">{r.marginPct}</small>}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+              <tr className="average-row">
+                <th scope="row">Average</th>
+                {COLUMNS.map((c) => (
+                  <td key={c}>
+                    {cells.average[c]}
+                    {info(c, cells.average[c])}
+                    {c === "margin" && cells.average.marginPct && (
+                      <small className="table-pct">
+                        {cells.average.marginPct}
+                        {info("marginPct", cells.average.marginPct)}
+                      </small>
+                    )}
+                  </td>
+                ))}
+              </tr>
             </tbody>
           </table>
         </div>

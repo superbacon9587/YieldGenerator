@@ -157,6 +157,12 @@
   overflow-wrap: anywhere;
 }
 
+.calc-rounding {
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: #64735f;
+}
+
 /* Data table under each chart. */
 .chart-data {
   margin-top: 14px;

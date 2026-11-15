@@ -80,6 +80,7 @@ from backend.schemas import (
     SimulateRequest,
     SimulateResponse,
 )
+from backend.rounding import mean, rnd
 from backend.summary import MONTH_NAMES
 
 DAYS_PER_MONTH = 365.25 / 12
@@ -226,7 +227,7 @@ def evaluate_options(req: OptimizeRequest, keys: list[OptionKey], wx: pd.DataFra
                           blocks=blocks, optional=OptionalIn(soil=req.soil))
     bt = engine.run_backtest(sim, wx)
     bt.context = ctx
-    engine.apply_money(bt, ctx)
+    engine.apply_money(bt, ctx, rounded=False)
     money = {b.id: [(bt.seasons[b.id][y].revenue, bt.seasons[b.id][y].cost) for y in years]
              for b in blocks}
     if req.price_mode == "current":
@@ -234,7 +235,7 @@ def evaluate_options(req: OptimizeRequest, keys: list[OptionKey], wx: pd.DataFra
     else:  # production value always uses current prices
         bt_now = replace(bt, request=sim.model_copy(update={"price_mode": "current"}),
                          water_cost_per_af={}, money_notes=[])
-        engine.apply_money(bt_now, ctx)
+        engine.apply_money(bt_now, ctx, rounded=False)
         current = {b.id: [bt.seasons[b.id][y].revenue for y in years] for b in blocks}
 
     for key, b in zip(todo, blocks):
@@ -534,7 +535,7 @@ def blocks_out(blocks: list[BlockIn], resp: SimulateResponse) -> list[OptimizeBl
         w = weights.get(b.id)
         out.append(OptimizeBlockOut(
             **b.model_dump(include=set(BlockIn.model_fields)),
-            avg_profit=round(sum(profits) / len(profits)) if profits else None,
+            avg_profit=rnd(mean(profits)) if profits else None,
             avg_yield_tons=w.avg_tons if w else None))
     return out
 

@@ -2,17 +2,16 @@ import { Wheat } from "lucide-react";
 import { CalcInfo } from "../provenance/CalcPopover.jsx";
 import { percent } from "../../domain.js";
 import { useYieldUnit } from "./YieldUnitContext.jsx";
-import { formatWeightNumber, unitLabel } from "./yieldUnits.js";
+import { unitLabel } from "./yieldUnits.js";
+import { formatCell, getChartRows } from "../provenance/chartData.js";
 import "./yield.css";
 
 /** "Average harvest per year" summary card, from summary_stats.avg_yield_tons. */
 export default function HarvestCard({ result, relativeYield }) {
   const { unit } = useYieldUnit();
-  const value = formatWeightNumber(
-    result?.summary_stats?.avg_yield_tons,
-    unit,
-    false,
-  );
+  // Same number as the Average row of the whole-farm harvest table, in the chosen unit.
+  const avg = getChartRows(result, { chart: "yield", scope: "farm", unit }).average.harvest;
+  const value = avg == null ? null : formatCell("harvest", avg, { unit });
   return (
     <div className="metric harvest-metric">
       <span className="metric-label">

@@ -73,17 +73,20 @@ def build(bt, response, wx):
             etc, eta = float(s.balance.etc[active].sum()), float(s.balance.eta[active].sum())
             heat_penalty = min(max(s.heat_stress_days-normal, 0)*engine.HEAT_PENALTY_PER_DAY, engine.HEAT_PENALTY_MAX)
             harvest_tpa = base_tons * row.relative_yield / typical if base_tons is not None and typical else None
-            water_cost = s.water_applied_af * bt.water_cost_per_af[row.year] if bt.water_cost_per_af[row.year] is not None else None
-            production_cost = cost["cost_excl_water"] * b.acres if cost else None
+            m = s.money or {}
+            water_cost = m["surface"] + m["groundwater"] if m else None
+            production_cost = m.get("production")
             query = {"parameters": ",".join(power_client.PARAMETERS), "community": "AG", "latitude": bt.grid_cell[0], "longitude": bt.grid_cell[1], "start": s.start.strftime("%Y%m%d"), "end": s.end.strftime("%Y%m%d"), "format": "JSON"}
             climate = wx.loc[str(s.start):str(s.end)]
             yearly.append({"year": row.year, "season_start": str(s.start), "season_end": str(s.end),
                 "displayed": row.model_dump(), "harvest_tons_per_acre": harvest_tpa,
                 "harvest_tons": harvest_tpa*b.acres if harvest_tpa is not None else None,
+                "harvest_tons_rounded": m.get("tons"),
                 "baseline_yield": base, "baseline_tons_per_acre": base_tons, "median_relative_yield": typical,
                 "crop_price": vars(price) if price else None, "electricity_price": vars(electricity) if electricity else None,
-                "sale_quantity": economics.convert_quantity(harvest_tpa*b.acres, "TON", price.unit, b.crop) if harvest_tpa is not None and price else None,
-                "revenue_unrounded": s.revenue, "cost_unrounded": s.cost, "profit_unrounded": s.profit,
+                "sale_quantity": m.get("qty"),
+                "revenue_unrounded": m.get("revenue_exact"), "cost_unrounded": m.get("cost_exact"),
+                "profit_unrounded": m["revenue_exact"] - m["cost_exact"] if m else None,
                 "production_cost_excl_water": production_cost, "production_cost_per_acre": cost["cost_excl_water"] if cost else None,
                 "production_cost_source": cost, "source_warnings": cost_warnings, "water_cost": water_cost,
                 "applied_water_unrounded_af": s.water_applied_af, "blended_water_price_per_af": bt.water_cost_per_af[row.year],
@@ -116,106 +119,182 @@ def build(bt, response, wx):
         "weather_record": {"start": str(wx.index.min().date()), "end": str(wx.index.max().date()), "grid_cell": list(bt.grid_cell)}}
 
 
-# ================================================================ calculation records
-# One record per number shown with an information button:
-#     {id, label, value, unit, decimals, formula_text, is_estimate,
-#      steps: [{text, expr, result}],
-#      inputs: [{name, value, unit, source, source_url, kind, is_estimate,
-#                estimate_reason, not_estimate_reason}]}
-# Every step's expr is plain arithmetic over the numbers printed in its text, so
-# tests can re-evaluate it. The last step's result equals value, which is the
-# number the response (and the UI) shows. Input kinds: farmer, nasa, nass
-# (reported data), reference, constant, model.
 
-import datetime as _dt
+
+# ================================================================ calculation records
+# One record per number shown with an information button. A person can redo every
+# record by hand from the box alone:
+#     {id, label, value, unit, decimals, formula_text, rounding, is_estimate,
+#      steps: [{text, expr, result, round}],
+#      inputs: [{name, value, unit, source, source_url, kind, is_estimate,
+#                estimate_reason, not_estimate_reason}],
+#      lb: the same record in pounds (weight records only)}
+# Rules (tests/test_hand_calculator.py):
+#   * expr uses only + - * / and parentheses on numbers that are input values or
+#     earlier step results; every conversion factor and count is an input;
+#   * result = expr, rounded half up to `round` decimals when round is set;
+#   * the last result equals value, the number the response and the UI show.
+# Values from a model (water balance, relative yield) are inputs tagged as estimates.
+# Input kinds: farmer, nasa, nass (reported data), reference, constant, model.
+
+import re as _re
 from backend import units
+from backend.rounding import exact_sum, mean, rnd
 
 CROP_NAMES = {"almonds": "Almonds", "walnuts": "Walnuts", "processing_tomatoes": "Processing tomatoes",
               "corn": "Corn", "oats": "Oats", "alfalfa_hay": "Alfalfa"}
 FARMER = "Farmer input"
-SAFE = {"__builtins__": {}, "min": min, "max": max, "round": round, "sum": sum, "len": len,
-        "abs": abs, "zip": zip}
 MODEL_SRC = "YieldGenerator model, backend/simulate.py"
-METRIC_LABELS = {"harvest": "Harvest", "sales": "Sales", "cost": "Cost", "margin": "Margin",
-                 "margin_pct": "Margin percent", "water": "Water", "yield": "Yield"}
+METRIC_LABELS = {"harvest": "harvest", "sales": "sales", "cost": "cost", "margin": "margin",
+                 "margin_pct": "margin percent", "water": "water", "yield": "yield"}
+ROUND_MONEY = "Dollars rounded to the nearest $1."
 
 
-def file_url(path):
-    return f"{REPO}/blob/{revision()}/{path}"
+# ---------------------------------------------------------------- safe arithmetic
+
+_TOKEN = _re.compile(r"\s*(?:(\d+(?:\.\d+)?)|(.))")
+
+
+def tokens(expr):
+    out = []
+    for number, op in _TOKEN.findall(expr):
+        if number:
+            out.append(float(number))
+        elif op.strip():
+            if op not in "+-*/()":
+                raise ValueError(f"Not basic arithmetic: {op!r} in {expr!r}")
+            out.append(op)
+    return out
 
 
 def evaluate(expr):
-    return eval(expr, SAFE)  # noqa: S307, expressions are built here from numbers only
+    """+ - * / and parentheses, left to right with the usual precedence. No eval()."""
+    toks, pos = tokens(expr), 0
+
+    def peek():
+        return toks[pos] if pos < len(toks) else None
+
+    def take():
+        nonlocal pos
+        pos += 1
+        return toks[pos - 1]
+
+    def atom():
+        t = take()
+        if t == "(":
+            v = add()
+            if take() != ")":
+                raise ValueError(f"Unbalanced parentheses in {expr!r}")
+            return v
+        if t == "-":
+            return -atom()
+        if isinstance(t, float):
+            return t
+        raise ValueError(f"Unexpected {t!r} in {expr!r}")
+
+    def mul():
+        v = atom()
+        while peek() in ("*", "/"):
+            v = v * atom() if take() == "*" else v / atom()
+        return v
+
+    def add():
+        v = mul()
+        while peek() in ("+", "-"):
+            v = v + mul() if take() == "+" else v - mul()
+        return v
+
+    v = add()
+    if pos != len(toks):
+        raise ValueError(f"Trailing tokens in {expr!r}")
+    return v
+
+
+def numbers_in(expr):
+    return [t for t in tokens(expr) if isinstance(t, float)]
+
+
+# ---------------------------------------------------------------- printing
+
+def plain(v):
+    """Shortest exact text for a number with at most 6 decimals: 2000, 0.934, 3520.3."""
+    s = f"{abs(v):.6f}".rstrip("0").rstrip(".")
+    return ("-" if v < 0 and s != "0" else "") + s
+
+
+def shown(v, money=False, decimals=None):
+    """Number with commas. Money gets a $ and, when it has cents, 2 or more decimals."""
+    if decimals is not None:
+        body = f"{abs(v):,.{decimals}f}"
+    else:
+        whole, _, frac = plain(abs(v)).partition(".")
+        if money and frac:
+            frac = frac.ljust(2, "0")
+        body = f"{int(whole):,}" + (f".{frac}" if frac else "")
+    sign = "-" if v < 0 and float(body.replace(",", "")) != 0 else ""
+    return f"{sign}${body}" if money else f"{sign}{body}"
 
 
 class N:
-    """A number as it appears in a step: value plus display decimals. Exact values print
-    without trailing zeros; values that need more digits to reproduce a result get them."""
+    """A number shown in the box. value is exactly what the text says."""
 
-    def __init__(self, value, d=2, money=False):
-        self.v, self.d, self.money = float(value), d, money
+    def __init__(self, value, money=False, decimals=None):
+        self.value = float(plain(value)) if decimals is None else rnd(value, decimals)
+        self.money, self.decimals = money, decimals
 
-    def _digits(self, k):
-        if round(self.v, self.d) != self.v:
-            return f"{abs(self.v):.{self.d + k}f}"
-        s = f"{abs(self.v):.{self.d}f}"
-        if self.money and self.d:
-            if round(self.v) == self.v:
-                return s.split(".")[0]
-            whole, frac = s.split(".")
-            return f"{whole}.{frac.rstrip('0').ljust(2, '0')}"
-        return s.rstrip("0").rstrip(".") if "." in s else s
+    @property
+    def text(self):
+        return shown(self.value, self.money, self.decimals)
 
-    def disp(self, k=0):
-        digits = self._digits(k)
-        whole, _, frac = digits.partition(".")
-        s = f"{int(whole):,}" + (f".{frac}" if frac else "")
-        sign = "-" if self.v < 0 and float(digits) != 0 else ""
-        return f"{sign}${s}" if self.money else f"{sign}{s}"
-
-    def lit(self, k=0):
-        s = self._digits(k)
-        return f"(-{s})" if self.v < 0 and float(s) != 0 else s
+    @property
+    def lit(self):
+        p = plain(self.value)
+        return f"({p})" if self.value < 0 else p
 
 
 class Record:
-    def __init__(self, rid, label, unit, decimals, formula):
-        self.id, self.label, self.unit, self.decimals, self.formula = rid, label, unit, decimals, formula
-        self.steps, self.inputs, self.value = [], [], None
+    def __init__(self, rid, label, unit, decimals, formula, rounding):
+        self.id, self.label, self.unit, self.decimals = rid, label, unit, decimals
+        self.formula, self.rounding = formula, rounding
+        self.steps, self.inputs = [], []
 
-    def step(self, text, ops, expr, d, unit="", money=False, true=None, keep="full"):
-        """Append '<text> = <result> <unit>'. Operand decimals grow until the printed
-        arithmetic reproduces the rounded result."""
-        exact = evaluate(expr.format(*[repr(o.v) for o in ops])) if true is None else true
-        result = round(exact, d) + 0.0
-        k = 0
-        for k in range(9):
-            if round(evaluate(expr.format(*[o.lit(k) for o in ops])), d) == result:
-                break
-        out = N(result, d, money)
-        line = text.format(*[o.disp(k) for o in ops]) + " = " + out.disp()
-        self.steps.append({"text": line + (f" {unit}" if unit else ""),
-                           "expr": expr.format(*[o.lit(k) for o in ops]), "result": result})
-        return out if keep == "rounded" else N(exact, d, money)
-
-    def raw(self, text, expr, result):
-        self.steps.append({"text": text, "expr": expr, "result": result})
-
-    def inp(self, name, value, unit, source, url=None, kind="reference", estimate=None, why_not=None):
+    def inp(self, name, value, unit, source, url=None, kind="reference", estimate=None, why_not=None,
+            money=False):
         self.inputs.append({"name": name, "value": value, "unit": unit, "source": source,
                             "source_url": url, "kind": kind, "is_estimate": bool(estimate),
                             "estimate_reason": estimate or None,
                             "not_estimate_reason": None if estimate else why_not})
+        return N(value, money) if isinstance(value, (int, float)) else None
 
-    def out(self, value):
-        self.value = value
-        return {"id": self.id, "label": self.label, "value": value, "unit": self.unit,
-                "decimals": self.decimals, "formula_text": self.formula,
-                "is_estimate": any(i["is_estimate"] for i in self.inputs),
-                "steps": self.steps, "inputs": self.inputs}
+    def step(self, text, ops, expr, unit="", round_to=None, money=False):
+        """Append '<text> = <result> <unit>'; ops fill {0}, {1}... in text and expr."""
+        e = expr.format(*[o.lit for o in ops])
+        exact = evaluate(e)
+        out = N(exact, money, round_to)
+        u = f" {unit}" if unit else ""
+        line = text.format(*[o.text for o in ops]) + " = "
+        if round_to is not None and float(plain(exact)) != out.value:
+            line += f"{shown(float(plain(exact)), money)}{u}, rounded to {out.text}{u}"
+        else:
+            line += f"{out.text}{u}"
+        self.steps.append({"text": line, "expr": e, "result": out.value, "round": round_to})
+        return out
+
+    def out(self, value, lb=None):
+        rec = {"id": self.id, "label": self.label, "value": value, "unit": self.unit,
+               "decimals": self.decimals, "formula_text": self.formula, "rounding": self.rounding,
+               "is_estimate": any(i["is_estimate"] for i in self.inputs),
+               "steps": self.steps, "inputs": self.inputs}
+        if lb is not None:
+            rec["lb"] = lb
+        return rec
 
 
 # ---------------------------------------------------------------- shared inputs
+
+def file_url(path):
+    return f"{REPO}/blob/{revision()}/{path}"
+
 
 def crop_name(crop):
     return CROP_NAMES.get(crop, crop.replace("_", " "))
@@ -230,65 +309,82 @@ def years_text(years):
     return f"{years[0]} to {years[-1]}" if len(years) > 1 else str(years[0])
 
 
-def span_text(values, d, money=False):
-    vals = [v for v in values if v is not None]
-    lo, hi = N(min(vals), d, money).disp(), N(max(vals), d, money).disp()
-    return f"{len(vals)} values, {lo}" if lo == hi else f"{len(vals)} values, {lo} to {hi}"
+def model_input(rec, name, value, unit, reason, money=False):
+    return rec.inp(name, value, unit, MODEL_SRC, file_url("backend/simulate.py"), "model", reason, money=money)
 
 
-def model_input(rec, name, value, unit, reason):
-    rec.inp(name, value, unit, MODEL_SRC, file_url("backend/simulate.py"), "model", reason)
+def const(rec, name, value, unit, source, why="Unit conversion", path="backend/units.py"):
+    return rec.inp(name, value, unit, source, file_url(path), "constant", why_not=why)
+
+
+def lb_per_ton(rec):
+    return const(rec, "Pounds per ton", 2000, "lb/ton", "US short ton, backend/units.py LB_PER_TON")
+
+
+def percent_factor(rec):
+    return const(rec, "Percent per whole", 100, "%", "Fraction x 100 = percent", "Definition of percent")
+
+
+def count_input(rec, n, what="Years with data"):
+    return rec.inp(what, n, "years", "Count of the yearly values listed above", None, "constant",
+                   why_not="Count of listed values")
 
 
 def acres_input(rec, b, blocks):
-    rec.inp(f"{block_name(b, blocks)} area", b.acres, "acres", FARMER, kind="farmer")
-
-
-def crop_field_input(rec, crop, field, name, value, unit):
-    entry = reference.get_crop(crop)[field]
-    reason = "Placeholder value still marked for checking in crops.json" if entry.get("verify") else None
-    rec.inp(name, value, unit, f"crops.json {crop}.{field}: {entry['source']}",
-            file_url("data/reference/crops.json"), "reference", reason,
-            "Published coefficient copied from the cited FAO table")
+    return rec.inp(f"{block_name(b, blocks)} area", b.acres, "acres", FARMER, kind="farmer")
 
 
 def baseline_input(rec, crop, ctx):
     base = ctx["baseline_yields"][crop]
     county = base["basis"] == "county"
     path = "data/validation/ca_county_yields.csv" if county else "data/validation/ca_state_yields.csv"
-    rec.inp(f"{crop_name(crop)} baseline yield (median)", base["value"], base["unit"].lower().replace(" ", ""),
-            base["source"], file_url(path), "nass",
-            None if county else "Statewide median, not enough county data for this location")
+    return rec.inp(f"{crop_name(crop)} baseline yield (NASS median)", base["value"],
+                   base["unit"].lower().replace(" ", ""), base["source"], file_url(path), "nass",
+                   None if county else "Statewide median, not enough county data for this location")
 
 
-def baseline_tons_steps(rec, crop, ctx):
-    """Steps that turn the NASS baseline into tons per acre. Returns N."""
-    base = ctx["baseline_yields"][crop]
+def harvest_ops(rec, b, ry, typical, ctx, blocks, with_acres):
+    """Inputs and the single expression that turns the NASS baseline into harvest.
+
+    Same order of operations as backend/yield_weight.py, so the result is exact."""
+    base = ctx["baseline_yields"][b.crop]
     u = units._normalize(base["unit"])
-    v = N(base["value"], 3)
+    v = baseline_input(rec, b.crop, ctx)
+    ry_n = model_input(rec, "Relative yield this year", ry, "fraction",
+                       "Model estimate from FAO-33 yield response (Ky) and FAO-56 water balance")
+    typ_n = model_input(rec, "Median relative yield over the backtest years", typical, "fraction",
+                        "Model estimate: median of the modeled relative yields")
     if u == units.LB_PER_ACRE:
-        return rec.step("Baseline {0} lb/acre / 2,000 lb/ton", [v], "{0}/2000", 6, "tons/acre")
-    if u == units.BU_PER_ACRE:
-        w = units.bushel_weight_lb(crop)
-        rec.inp(f"{crop_name(crop)} bushel weight", w, "lb/bu", "USDA standard test weight, backend/units.py",
-                file_url("backend/units.py"), "constant", why_not="Fixed USDA unit conversion")
-        return rec.step("Baseline {0} bu/acre x {1} lb/bu / 2,000 lb/ton", [v, N(w, 0)], "{0}*{1}/2000", 6,
-                        "tons/acre")
-    return N(base["value"], 3)
+        ops, text, expr = [v, lb_per_ton(rec)], "{0} lb/acre / {1} lb/ton", "{0}/{1}"
+    elif u == units.BU_PER_ACRE:
+        w = const(rec, f"{crop_name(b.crop)} bushel weight", units.bushel_weight_lb(b.crop), "lb/bu",
+                  "USDA standard test weight, backend/units.py BUSHEL_WEIGHT_LB")
+        ops, text, expr = [v, w, lb_per_ton(rec)], "{0} bu/acre x {1} lb/bu / {2} lb/ton", "{0}*{1}/{2}"
+    else:
+        ops, text, expr = [v], "{0} tons/acre", "{0}"
+    k = len(ops)
+    ops = ops + [ry_n, typ_n]
+    text += f" x {{{k}}} / {{{k + 1}}}"
+    expr += f"*{{{k}}}/{{{k + 1}}}"
+    if with_acres:
+        ops.append(acres_input(rec, b, blocks))
+        text += f" x {{{k + 2}}} acres"
+        expr += f"*{{{k + 2}}}"
+    return text, ops, expr
 
 
-def typical_ry(response_block):
-    return median(r.relative_yield for r in response_block.yearly)
+def share_input(rec, req):
+    share = req.optional.surface_water_share
+    if "surface_water_share" in req.optional.model_fields_set:
+        return rec.inp("Surface water share", share, "fraction", FARMER, kind="farmer")
+    return rec.inp("Surface water share", share, "fraction", "Default in backend/schemas.py OptionalIn",
+                   file_url("backend/schemas.py"), "reference", "Default assumption, 50% surface water")
 
 
-def ry_inputs(rec, b, out_block, year=None):
-    ys = [r.year for r in out_block.yearly]
-    if year is not None:
-        row = next(r for r in out_block.yearly if r.year == year)
-        model_input(rec, f"Relative yield {year}", row.relative_yield, "fraction",
-                    "Model estimate from FAO-33 yield response and FAO-56 water balance")
-    model_input(rec, f"Median relative yield, {years_text(ys)}", typical_ry(out_block), "fraction",
-                "Model estimate: median of the modeled relative yields")
+@cache
+def json_defaults():
+    import json
+    return json.loads((ROOT / "data/reference/prices/defaults.json").read_text())
 
 
 def water_price_input(rec, ctx):
@@ -301,533 +397,499 @@ def water_price_input(rec, ctx):
             src = entry.get("source", src)
     reason = ("Team estimate, no district rate found" if "Team estimate" in src
               else "Typical district rate, not this farm's water bill")
-    rec.inp("Surface water price", value, "$/acre-ft", f"defaults.json surface_water_price_per_af: {src}",
-            file_url("data/reference/prices/defaults.json"), "reference", reason)
+    return rec.inp("Surface water price", value, "$/acre-ft", f"defaults.json surface_water_price_per_af: {src}",
+                   file_url("data/reference/prices/defaults.json"), "reference", reason, money=True)
 
 
-@cache
-def json_defaults():
-    import json
-    return json.loads((ROOT / "data/reference/prices/defaults.json").read_text())
+def yearly_inputs(rec, name, pairs, unit, reason, money=False):
+    return [model_input(rec, f"{name}, {y}", v, unit, reason, money) for y, v in pairs]
 
 
-def share_input(rec, req):
-    share = req.optional.surface_water_share
-    if "surface_water_share" in req.optional.model_fields_set:
-        rec.inp("Surface water share", share, "fraction", FARMER, kind="farmer")
-    else:
-        rec.inp("Surface water share", share, "fraction", "Default in backend/schemas.py OptionalIn",
-                file_url("backend/schemas.py"), "reference", "Default assumption, 50% surface water")
-
-
-def series_input(rec, name, pairs, d, unit, reason, money=False):
-    vals = [v for _, v in pairs]
-    model_input(rec, f"{name}, {years_text([y for y, _ in pairs])}", span_text(vals, d, money), unit, reason)
-
-
-# ---------------------------------------------------------------- generic averages
-
-def average_steps(rec, pairs, d_in, d_out, unit, money=False, divisor=None, d_mid=None):
-    """Sum the yearly values, divide by the year count (and optionally by acres)."""
-    if money:
-        unit = "per acre" if unit.endswith("/acre") else ""
-    mid_unit = "" if money else unit.replace("/acre", "")
-    ops = [N(v, d_in, money) for _, v in pairs]
-    years = [y for y, _ in pairs]
+def sum_step(rec, ops, unit="", money=False, what="yearly values"):
     if len(ops) == 1:
-        total = ops[0]
-        rec.raw(f"Only year {years[0]}: {total.disp()}" + (f" {unit}" if unit else ""), total.lit(), round(total.v, d_in) + 0.0)
-    else:
-        text = f"Sum of {len(ops)} yearly values ({years_text(years)}): " + " + ".join(
-            "{%d}" % i for i in range(len(ops)))
-        total = rec.step(text, ops, " + ".join("{%d}" % i for i in range(len(ops))), d_in,
-                         mid_unit if divisor is not None else unit, money)
-    n = N(len(ops), 0)
-    if divisor is None:
-        return rec.step("{0} / {1} years", [total, n], "{0}/{1}", d_out, unit, money)
-    mean_ = rec.step("{0} / {1} years", [total, n], "{0}/{1}", d_mid if d_mid is not None else d_out + 2,
-                     mid_unit, money)
-    return rec.step("{0} / {1} acres", [mean_, N(divisor, 2)], "{0}/{1}", d_out, unit, money)
+        return rec.step("Only one yearly value", ops, "{0}", unit, money=money)
+    idx = range(len(ops))
+    return rec.step(f"Sum of {len(ops)} {what}: " + " + ".join("{%d}" % i for i in idx), ops,
+                    " + ".join("{%d}" % i for i in idx), unit, money=money)
+
+
+def average_steps(rec, ops, round_to, unit="", money=False, scale=None):
+    """Sum, optionally x a conversion factor, then / number of years, rounded."""
+    total = sum_step(rec, ops, "tons" if scale else unit, money)
+    if scale is not None:
+        total = rec.step("{0} tons x {1} lb/ton", [total, scale], "{0}*{1}", "lb")
+    n = count_input(rec, len(ops))
+    return rec.step("{0} / {1} years", [total, n], "{0}/{1}", unit, round_to, money)
+
+
+def lb_variant(rec_factory, steps_fn):
+    """Build the pounds version of a weight record with the same inputs plus 2,000 lb/ton."""
+    rec = rec_factory()
+    steps_fn(rec)
+    return rec
 
 
 # ---------------------------------------------------------------- summary records
+
+MONEY_REASON = "Model estimate: modeled harvest x NASS price, minus regional study cost and modeled water"
+
 
 def summary_records(response, req, ctx):
     out = {}
     totals = response.farm_totals
     stats = response.summary_stats
     yr = years_text(response.years)
-    money_years = [(t.year, t.profit) for t in totals if t.profit is not None]
-    reason = "Model estimate: revenue from modeled harvest and NASS prices, cost from a regional study and modeled water"
+    money_rows = [t for t in totals if t.profit is not None]
 
-    def money_avg(rid, label, field, value, d_out):
+    def money_average(rid, label, field, value):
         pairs = [(t.year, getattr(t, field)) for t in totals if getattr(t, field) is not None]
         if not pairs or value is None:
             return
-        rec = Record(rid, label, "$", 0, f"Sum of yearly farm {METRIC_LABELS.get(field, field).lower() if field != 'profit' else 'margin'} / number of years with price data, {yr}")
-        series_input(rec, f"Yearly farm {'margin' if field == 'profit' else field}", pairs, 0, "$", reason, True)
-        average_steps(rec, pairs, 0, d_out, "", money=True)
+        word = {"revenue": "sales", "cost": "cost"}[field]
+        rec = Record(rid, label, "$", 0, f"Sum of yearly farm {word} / number of years with price data, {yr}",
+                     ROUND_MONEY)
+        ops = yearly_inputs(rec, f"Farm {word}", pairs, "$", MONEY_REASON, True)
+        average_steps(rec, ops, 0, money=True)
         out[rid] = rec.out(value)
 
-    if stats is not None:
-        money_avg("summary.avg_profit", "Estimated margin per year", "profit", stats.avg_profit, 0)
-        money_avg("summary.avg_cost", "Estimated cost per year", "cost", stats.avg_cost, 0)
-        revs = [t.revenue for t in totals if t.revenue is not None]
-        money_avg("summary.avg_revenue", "Estimated sales per year", "revenue",
-                  round(sum(revs) / len(revs), 2) if revs else None, 2)
-        if stats.total_profit is not None and money_years:
-            rec = Record("summary.total_profit", "Total estimated margin", "$", 0,
-                         f"Sum of yearly farm margins (sales minus cost), {yr}")
-            series_input(rec, "Yearly farm margin", money_years, 0, "$", reason, True)
-            ops = [N(v, 0, True) for _, v in money_years]
-            rec.step(f"Sum of {len(ops)} yearly margins: " + " + ".join("{%d}" % i for i in range(len(ops))),
-                     ops, " + ".join("{%d}" % i for i in range(len(ops))), 0, money=True)
-            out[rec.id] = rec.out(stats.total_profit)
-        if stats.avg_relative_yield is not None:
-            pairs = [(t.year, t.relative_yield) for t in totals]
-            rec = Record("summary.avg_relative_yield", "Average relative yield", "%", 1,
-                         f"Average over {yr} of the acre-weighted farm relative yield, x 100")
-            series_input(rec, "Yearly farm relative yield (acre-weighted)", pairs, 3, "fraction",
-                         "Model estimate from FAO-33 yield response and FAO-56 water balance")
-            m = average_steps(rec, pairs, 3, 3, "")
-            rec.step("{0} x 100", [m], "{0}*100", 1, "%")
-            out[rec.id] = rec.out(round(stats.avg_relative_yield * 100, 1))
-        if stats.avg_water_applied_af is not None:
-            pairs = [(t.year, t.water_applied_af) for t in totals]
-            rec = Record("summary.avg_water_applied_af", "Average water per year", "acre-ft", 1,
-                         f"Sum of yearly farm water applied / number of years, {yr}")
-            series_input(rec, "Yearly farm water applied", pairs, 1, "acre-ft",
-                         "Model estimate from FAO-56 water balance")
-            average_steps(rec, pairs, 1, 1, "acre-ft")
-            out[rec.id] = rec.out(stats.avg_water_applied_af)
-        if stats.avg_yield_tons is not None:
-            out.update(harvest_summary(response, req, ctx))
-    if money_years:
-        rec = Record("summary.worst_profit", "Lowest yearly profit", "$", 0, f"Smallest yearly farm margin, {yr}")
-        series_input(rec, "Yearly farm margin", money_years, 0, "$", reason, True)
-        ops = [N(v, 0, True) for _, v in money_years]
-        rec.step("Smallest of " + ", ".join("{%d}" % i for i in range(len(ops))), ops,
-                 "min(" + ", ".join("{%d}" % i for i in range(len(ops))) + ")", 0, money=True)
-        out[rec.id] = rec.out(min(v for _, v in money_years))
+    if stats is not None and money_rows:
+        money_average("summary.avg_cost", "Estimated cost per year", "cost", stats.avg_cost)
+        avg_rev = rnd(mean(t.revenue for t in money_rows))
+        money_average("summary.avg_revenue", "Estimated sales per year", "revenue", avg_rev)
+        rec = Record("summary.avg_profit", "Estimated margin per year", "$", 0,
+                     f"Average yearly sales - average yearly cost, {yr}", ROUND_MONEY + " Averages first, then subtracted.")
+        s_ops = yearly_inputs(rec, "Farm sales", [(t.year, t.revenue) for t in money_rows], "$", MONEY_REASON, True)
+        c_ops = yearly_inputs(rec, "Farm cost", [(t.year, t.cost) for t in money_rows], "$", MONEY_REASON, True)
+        n = count_input(rec, len(money_rows))
+        s_avg = rec.step("Average sales: {0} / {1} years", [sum_step(rec, s_ops, money=True, what="yearly sales values"), n],
+                         "{0}/{1}", round_to=0, money=True)
+        c_avg = rec.step("Average cost: {0} / {1} years", [sum_step(rec, c_ops, money=True, what="yearly cost values"), n],
+                         "{0}/{1}", round_to=0, money=True)
+        rec.step("Margin: {0} - {1}", [s_avg, c_avg], "{0}-{1}", money=True)
+        out[rec.id] = rec.out(stats.avg_profit)
+        rec = Record("summary.total_profit", "Total estimated margin", "$", 0,
+                     f"Sum of yearly farm margins (sales - cost), {yr}", ROUND_MONEY)
+        ops = yearly_inputs(rec, "Farm margin", [(t.year, t.profit) for t in money_rows], "$", MONEY_REASON, True)
+        sum_step(rec, ops, money=True, what="yearly margins")
+        out[rec.id] = rec.out(stats.total_profit)
+    if stats is not None and stats.avg_relative_yield is not None:
+        rec = Record("summary.avg_relative_yield", "Average relative yield", "%", 1,
+                     f"Average of the yearly acre-weighted farm relative yield, x 100, {yr}",
+                     "Average rounded to 0.001, then shown as a percent.")
+        ops = yearly_inputs(rec, "Farm relative yield", [(t.year, t.relative_yield) for t in totals], "fraction",
+                            "Model estimate from FAO-33 yield response and FAO-56 water balance")
+        m = average_steps(rec, ops, 3)
+        rec.step("{0} x {1}", [m, percent_factor(rec)], "{0}*{1}", "%", 1)
+        out[rec.id] = rec.out(rnd(stats.avg_relative_yield * 100, 1))
+    if stats is not None and stats.avg_water_applied_af is not None:
+        rec = Record("summary.avg_water_applied_af", "Average water per year", "acre-ft", 1,
+                     f"Sum of yearly farm water applied / number of years, {yr}", "Water rounded to 0.1 acre-ft.")
+        ops = yearly_inputs(rec, "Farm water applied", [(t.year, t.water_applied_af) for t in totals], "acre-ft",
+                            "Model estimate from FAO-56 water balance")
+        average_steps(rec, ops, 1, "acre-ft")
+        out[rec.id] = rec.out(stats.avg_water_applied_af)
+    if stats is not None and stats.avg_yield_tons is not None:
+        found = table_average(response, req, "farm", False, "harvest")
+        if found:
+            rec_t, rec_lb = found
+            out["summary.avg_yield_tons"] = {**rec_t, "id": "summary.avg_yield_tons",
+                                             "label": "Estimated harvest per year",
+                                             "lb": {**rec_lb, "id": "summary.avg_yield_tons",
+                                                    "label": "Estimated harvest per year"}}
     out.update(ranking_records(response))
     budget = req.optional.budget_usd
-    if budget is not None and all(t.cost is not None for t in totals):
+    if budget is not None and totals and all(t.cost is not None for t in totals):
         rec = Record("summary.years_over_budget", "Years over budget", "years", 0,
-                     "Count of years where estimated farm cost is above the yearly budget")
-        rec.inp("Yearly operating budget", budget, "$", FARMER, kind="farmer")
-        series_input(rec, "Yearly farm cost", [(t.year, t.cost) for t in totals], 0, "$", reason, True)
-        over = [t for t in totals if t.cost > budget]
-        listed = ", ".join(f"{t.year} ({N(t.cost, 0, True).disp()})" for t in over) or "none"
-        costs = ", ".join(N(t.cost, 0).lit() for t in totals)
-        rec.raw(f"Years with cost above {N(budget, 0, True).disp()}: {listed} = {len(over)} years",
-                f"len([c for c in [{costs}] if c > {N(budget, 2).lit()}])", len(over))
+                     "Count of years where estimated farm cost is above the yearly budget",
+                     "Whole years, no rounding.")
+        b = rec.inp("Yearly operating budget", budget, "$", FARMER, kind="farmer", money=True)
+        costs = yearly_inputs(rec, "Farm cost", [(t.year, t.cost) for t in totals], "$", MONEY_REASON, True)
+        over = [(t, c) for t, c in zip(totals, costs) if t.cost > budget]
+        for t, c in over:
+            rec.step(f"{t.year}: cost {{0}} - budget {{1}}", [c, b], "{0}-{1}", "above the budget", money=True)
+        if over:
+            one = rec.inp("Each year above the budget counts as", 1, "year", "Counting rule", None, "constant",
+                          why_not="Counting rule")
+            rec.step(" + ".join(["{0}"] * len(over)) + " (years above)", [one], "+".join(["{0}"] * len(over)), "years")
+        else:
+            zero = rec.inp("Years above the budget", 0, "years", "No year's cost is above the budget",
+                           None, "constant", why_not="Count of the listed years")
+            rec.step("No year is above the budget", [zero], "{0}", "years")
         out[rec.id] = rec.out(len(over))
     return out
 
 
 def ranking_records(response):
+    """The best and worst year are a selection, not arithmetic: the record lists every
+    yearly value and shows the selected year's value."""
     totals = response.farm_totals
     by_profit = all(t.profit is not None for t in totals)
-    field, d, money = ("profit", 0, True) if by_profit else ("relative_yield", 3, False)
     what = "farm margin" if by_profit else "farm relative yield"
-    years = [t.year for t in totals]
-    vals = [getattr(t, field) for t in totals]
     out = {}
-    for key, fn, pick, year in (("best_year", "max", -1, response.summary.best_year),
-                                ("worst_year", "min", 0, response.summary.worst_year)):
-        rec = Record(f"summary.{key}", f"Year with the {'highest' if fn == 'max' else 'lowest'} {what}", "year", 0,
-                     f"Year with the {'highest' if fn == 'max' else 'lowest'} yearly {what}, {years_text(years)}")
-        series_input(rec, f"Yearly {what}", list(zip(years, vals)), d, "$" if money else "fraction",
-                     "Model estimate from the backtest", money)
-        ops = [N(v, d, money) for v in vals]
-        top = rec.step(f"{'Highest' if fn == 'max' else 'Lowest'} {what}: {fn}(" + ", ".join(
-            "{%d}" % i for i in range(len(ops))) + ")", ops,
-            f"{fn}(" + ", ".join("{%d}" % i for i in range(len(ops))) + ")", d, money=money)
-        lits = ", ".join(N(v, d).lit() for v in vals)
-        rec.raw(f"Year with {what} {top.disp()} = {year}",
-                f"[y for y, v in zip([{', '.join(map(str, years))}], [{lits}]) if v == {N(top.v, d).lit()}][{pick}]",
-                year)
-        out[rec.id] = rec.out(year)
+    if not totals:
+        return out
+    for key, pick in (("best_year", max), ("worst_year", min)):
+        vals = [(t.year, t.profit if by_profit else t.relative_yield) for t in totals]
+        year = response.summary.best_year if key == "best_year" else response.summary.worst_year
+        chosen = next(v for y, v in vals if y == year)
+        word = "highest" if pick is max else "lowest"
+        rec = Record(f"summary.{key}", f"Year with the {word} {what}", "$" if by_profit else "fraction",
+                     0 if by_profit else 3, f"The year whose {what} is the {word} of the listed years",
+                     ROUND_MONEY if by_profit else "Relative yield to 0.001.")
+        ops = yearly_inputs(rec, what.capitalize(), vals, "$" if by_profit else "fraction",
+                            "Model estimate from the backtest", by_profit)
+        idx = [y for y, _ in vals].index(year)
+        rec.step(f"{word.capitalize()} of the {len(vals)} listed values, year {year}", [ops[idx]], "{0}",
+                 money=by_profit)
+        out[rec.id] = rec.out(chosen)
+        if by_profit and key == "worst_year":
+            out["summary.worst_profit"] = {**rec.out(chosen), "id": "summary.worst_profit",
+                                           "label": "Lowest yearly farm margin"}
+    if not by_profit and any(t.profit is not None for t in totals):
+        pairs = [(t.year, t.profit) for t in totals if t.profit is not None]
+        y, v = min(pairs, key=lambda p: p[1])
+        rec = Record("summary.worst_profit", "Lowest yearly farm margin", "$", 0,
+                     "The lowest of the listed yearly farm margins", ROUND_MONEY)
+        ops = yearly_inputs(rec, "Farm margin", pairs, "$", "Model estimate from the backtest", True)
+        rec.step(f"Lowest of the {len(pairs)} listed values, year {y}", [ops[[p[0] for p in pairs].index(y)]],
+                 "{0}", money=True)
+        out[rec.id] = rec.out(v)
     return out
-
-
-def harvest_summary(response, req, ctx):
-    stats = response.summary_stats
-    yr = years_text(response.years)
-    rec = Record("summary.avg_yield_tons", "Estimated harvest per year", "tons", 2,
-                 f"Sum over crops of (average harvest per acre x acres), averaged over {yr}")
-    parts = []
-    for b, w in zip(req.blocks, response.yield_weight):
-        tons = [r.tons for r in w.yearly if r.tons is not None]
-        if not tons:
-            continue
-        mean_b = sum(tons) / len(tons)
-        acres_input(rec, b, req.blocks)
-        baseline_input(rec, b.crop, ctx)
-        series_input(rec, f"{block_name(b, req.blocks)} yearly harvest",
-                     [(r.year, r.tons) for r in w.yearly if r.tons is not None], 2, "tons",
-                     "Model estimate: NASS median yield scaled by modeled relative yield")
-        parts.append(rec.step(f"{block_name(b, req.blocks)}: {{0}} tons/acre x {{1}} acres",
-                              [N(mean_b / b.acres, 4), N(b.acres, 2)], "{0}*{1}", 4, "tons"))
-    if len(parts) == 1:
-        rec.step("Total, rounded to 0.01", parts, "{0}", 2, "tons")
-    else:
-        rec.step("Total = " + " + ".join("{%d}" % i for i in range(len(parts))), parts,
-                 " + ".join("{%d}" % i for i in range(len(parts))), 2, "tons")
-    return {rec.id: rec.out(stats.avg_yield_tons)}
 
 
 # ---------------------------------------------------------------- block and year records
 
-def season_inputs(rec, b, s, grid, url):
-    rec.inp(f"Growing months {b.start_month} to {b.end_month}", f"{s.start} to {s.end}", "dates", FARMER,
-            kind="farmer")
-
-
 def block_year_records(bt, response, wx):
     from backend import simulate as engine
     req, ctx = bt.request, bt.context
-    prepared = engine.prepare_weather(wx)
-    prices, utilities, defaults = engine._price_tables()
     weights = {w.block_id: w for w in response.yield_weight}
     out = {}
     lat, lon = bt.grid_cell
     for b, ob in zip(req.blocks, response.blocks):
         params = reference.crop_params(b.crop)
         name = block_name(b, req.blocks)
-        normal = engine.normal_heat_days(b, prepared)
-        typical = typical_ry(ob)
+        typical = median(r.relative_yield for r in ob.yearly)
         w = weights.get(b.id)
+        irr = reference.irrigation()[engine.IRRIGATION_KEYS.get(b.irrigation, b.irrigation)]
         for r in ob.yearly:
             s = bt.seasons[b.id][r.year]
-            days = prepared.loc[str(s.start):str(s.end)]
             query = {"parameters": ",".join(power_client.PARAMETERS), "community": "AG", "latitude": lat,
                      "longitude": lon, "start": s.start.strftime("%Y%m%d"), "end": s.end.strftime("%Y%m%d"),
                      "format": "JSON"}
             url = power_client.API_URL + "?" + urlencode(query)
             nasa = f"NASA POWER daily, grid cell {lat:g}, {lon:g}, {s.start} to {s.end}"
             key = f"block.{b.id}.{r.year}"
-            n_days, n_active = len(days), int(s.active.sum())
-            fao = "Model estimate from FAO-56 water balance"
+            fao = "Model estimate from the FAO-56 daily water balance driven by NASA POWER weather"
 
-            # crop water use
             rec = Record(f"{key}.crop_water_use_in", f"Crop water use, {name}, {r.year}", "in", 1,
-                         "Sum over season days of (reference ET0 x crop coefficient Kc), mm / 25.4")
-            season_inputs(rec, b, s, bt.grid_cell, url)
-            rec.inp("Reference ET0, season total", round(float(days["et0_mm_day"].sum()), 2), "mm", nasa, url,
-                    "model", "Model estimate: FAO-56 Penman-Monteith from NASA POWER weather")
-            crop_field_input(rec, b.crop, "kc", "Crop coefficient Kc (ini, mid, end)",
-                             f"{params['kc']['ini']}, {params['kc']['mid']}, {params['kc']['end']}", "")
-            etc = rec.step(f"Sum over {n_days} days of daily ET0 x Kc", [N(float(s.balance.etc.sum()), 2)],
-                           "{0}", 2, "mm")
-            rec.step("{0} mm / 25.4 mm per inch", [etc], "{0}/25.4", 1, "in")
+                         "Season crop water use in mm / 25.4 mm per inch", "Inches rounded to 0.1.")
+            etc = rec.inp("Season crop water use (sum of daily ET0 x Kc)", rnd(float(s.balance.etc.sum()), 4), "mm",
+                          nasa, url, "model", "Model estimate: FAO-56 Penman-Monteith ET0 from NASA POWER x crops.json Kc")
+            mm = const(rec, "Millimeters per inch", 25.4, "mm/in", "Definition of the inch", path="backend/simulate.py")
+            rec.step("{0} mm / {1} mm per inch", [etc, mm], "{0}/{1}", "in", 1)
             out[rec.id] = rec.out(r.crop_water_use_in)
 
-            # effective rain
             rec = Record(f"{key}.effective_rain_in", f"Effective rain, {name}, {r.year}", "in", 1,
-                         "Sum over season days of rain stored in the root zone, mm / 25.4")
-            season_inputs(rec, b, s, bt.grid_cell, url)
-            rec.inp("Rain, season total", round(float(days["precip_mm_day"].sum()), 2), "mm", nasa, url, "nasa")
-            rec.inp("Effective rain rule", f"rain under {engine.RAIN_THRESHOLD_MM:g} mm/day ignored, "
-                    f"{engine.RAIN_EFFECTIVE_FRACTION:.0%} of larger rain counted", "",
-                    "backend/simulate.py RAIN_THRESHOLD_MM, RAIN_EFFECTIVE_FRACTION (Dastane 1974, FAO paper 25)",
-                    file_url("backend/simulate.py"), "constant",
-                    "Fixed-percentage method, not measured infiltration")
-            soil = reference.soils()[req.optional.soil]
-            rec.inp(f"Soil water holding, {req.optional.soil}", soil["awc_mm_per_m"], "mm/m",
-                    f"soils.json {req.optional.soil}: {soil['source']}", file_url("data/reference/soils.json"),
-                    "reference", "Midpoint of the FAO-56 Table 19 range")
-            rain = rec.step(f"Sum over {n_days} days of rain stored in the root zone",
-                            [N(float(s.balance.rain_eff.sum()), 2)], "{0}", 2, "mm")
-            rec.step("{0} mm / 25.4 mm per inch", [rain], "{0}/25.4", 1, "in")
+                         "Season rain stored in the root zone in mm / 25.4 mm per inch", "Inches rounded to 0.1.")
+            rain = rec.inp("Season effective rain stored in the root zone", rnd(float(s.balance.rain_eff.sum()), 4),
+                           "mm", nasa, url, "model",
+                           "Model estimate: NASA POWER rain, 5 mm/day threshold and 80% rule, limited by soil holding")
+            mm = const(rec, "Millimeters per inch", 25.4, "mm/in", "Definition of the inch", path="backend/simulate.py")
+            rec.step("{0} mm / {1} mm per inch", [rain, mm], "{0}/{1}", "in", 1)
             out[rec.id] = rec.out(r.effective_rain_in)
 
-            # water applied
             rec = Record(f"{key}.water_applied_af", f"Water applied, {name}, {r.year}", "acre-ft", 1,
-                         "Net irrigation (mm) / 304.8 mm per ft x acres / irrigation efficiency")
-            model_input(rec, "Net irrigation applied", round(s.applied_net_mm, 2), "mm", fao)
-            acres_input(rec, b, req.blocks)
-            irr = reference.irrigation()[engine.IRRIGATION_KEYS.get(b.irrigation, b.irrigation)]
-            rec.inp(f"Irrigation efficiency, {b.irrigation.replace('_', ' ')}", irr["efficiency"], "fraction",
-                    f"irrigation.json: {irr['source']}", file_url("data/reference/irrigation.json"), "reference",
-                    "Placeholder typical efficiency, marked for checking in irrigation.json" if irr.get("verify") else None,
-                    "Published efficiency")
-            if s.capped:
-                rec.inp("Farm water limit", req.optional.water_available_af, "acre-ft/year", FARMER, kind="farmer")
-            net = rec.step("{0} mm / 304.8 mm per ft x {1} acres", [N(s.applied_net_mm, 2), N(b.acres, 2)],
-                           "{0}/304.8*{1}", 4, "acre-ft")
-            rec.step("{0} acre-ft / {1} efficiency", [net, N(s.efficiency, 2)], "{0}/{1}", 1, "acre-ft")
+                         "Net irrigation mm / 304.8 mm per ft x acres / irrigation efficiency", "Water rounded to 0.1 acre-ft.")
+            net = model_input(rec, "Net irrigation applied to the root zone", rnd(s.applied_net_mm, 4), "mm",
+                              fao + (", limited by the farm water cap" if s.capped else ""))
+            ft = const(rec, "Millimeters per foot", 304.8, "mm/ft", "Definition of the foot", path="backend/simulate.py")
+            acres = acres_input(rec, b, req.blocks)
+            eff = rec.inp(f"Irrigation efficiency, {b.irrigation.replace('_', ' ')}", irr["efficiency"], "fraction",
+                          f"irrigation.json: {irr['source']}", file_url("data/reference/irrigation.json"), "reference",
+                          "Placeholder typical efficiency, marked for checking in irrigation.json" if irr.get("verify")
+                          else None, "Published efficiency")
+            rec.step("{0} mm / {1} mm per ft x {2} acres / {3}", [net, ft, acres, eff], "{0}/{1}*{2}/{3}", "acre-ft", 1)
             out[rec.id] = rec.out(r.water_applied_af)
 
-            # relative yield
             rec = Record(f"{key}.relative_yield", f"Percent of full potential, {name}, {r.year}", "%", 1,
-                         "(1 - Ky x (1 - actual ET / full ET)) - heat penalty, kept between 0 and 1, x 100")
-            crop_field_input(rec, b.crop, "ky", "Yield response factor Ky", params["ky"], "")
-            etc_a, eta_a = float(s.balance.etc[s.active].sum()), float(s.balance.eta[s.active].sum())
-            model_input(rec, "Full crop ET, growing days", round(etc_a, 2), "mm", fao)
-            model_input(rec, "Actual crop ET, growing days", round(eta_a, 2), "mm", fao)
-            rec.inp("Heat days this season", s.heat_stress_days, "days", nasa, url, "nasa")
-            rec.inp("Normal heat days (median of all seasons)", normal, "days",
-                    f"NASA POWER daily, grid cell {lat:g}, {lon:g}, {prepared.index.min().date()} to "
-                    f"{prepared.index.max().date()}", None, "nasa")
-            rec.inp("Heat penalty", f"{engine.HEAT_PENALTY_PER_DAY} per extra day, up to {engine.HEAT_PENALTY_MAX}",
-                    "fraction", "backend/simulate.py HEAT_PENALTY_PER_DAY, HEAT_PENALTY_MAX",
-                    file_url("backend/simulate.py"), "constant", "Team assumption, not a published coefficient")
-            if etc_a > 0:
-                wf = rec.step("1 - {0} x (1 - {1} mm / {2} mm)", [N(params["ky"], 2), N(eta_a, 2), N(etc_a, 2)],
-                              "1-{0}*(1-{1}/{2})", 4)
-            else:
-                rec.raw("No crop ET on growing days, water factor = 1", "1", 1)
-                wf = N(1, 0)
-            pen = rec.step("Heat penalty: min(max({0} - {1}, 0) x 0.0025, 0.10)",
-                           [N(s.heat_stress_days, 0), N(normal, 1)], "min(max({0}-{1},0)*0.0025,0.10)", 4)
-            ry = rec.step("{0} - {1}, kept between 0 and 1", [wf, pen], "min(max({0}-{1},0),1)", 3,
-                          true=s.relative_yield, keep="rounded")
-            rec.step("{0} x 100", [ry], "{0}*100", 1, "%")
-            out[rec.id] = rec.out(round(r.relative_yield * 100, 1))
+                         "Relative yield x 100", "Percent rounded to 0.1.")
+            ry = model_input(rec, "Relative yield", r.relative_yield, "fraction",
+                             "Model estimate: FAO-33 1 - Ky x (1 - actual ET / full ET), minus a heat-day penalty")
+            rec.step("{0} x {1}", [ry, percent_factor(rec)], "{0}*{1}", "%", 1)
+            out[rec.id] = rec.out(rnd(r.relative_yield * 100, 1))
 
-            # harvest per acre and total
-            if w is not None:
-                wr = next(x for x in w.yearly if x.year == r.year)
-                if wr.tons_per_acre is not None:
-                    for field, label, d in (("tons_per_acre", "Harvest per acre", 3), ("tons", "Total harvest", 2)):
+            wr = next((x for x in w.yearly if x.year == r.year), None) if w else None
+            if wr is not None and wr.tons_per_acre is not None:
+                for field, label, d, with_acres in (("tons_per_acre", "Harvest per acre", 3, False),
+                                                    ("tons", "Total harvest", 2, True)):
+                    unit = "tons" if with_acres else "tons/acre"
+
+                    def build(lb, field=field, label=label, d=d, with_acres=with_acres, unit=unit):
                         rec = Record(f"{key}.{field}", f"{label}, {name}, {r.year}",
-                                     "tons/acre" if field == "tons_per_acre" else "tons", d,
-                                     "NASS median yield in tons/acre x relative yield / median relative yield"
-                                     + (" x acres" if field == "tons" else ""))
-                        baseline_input(rec, b.crop, ctx)
-                        ry_inputs(rec, b, ob, r.year)
-                        base = baseline_tons_steps(rec, b.crop, ctx)
-                        if field == "tons":
-                            acres_input(rec, b, req.blocks)
-                            rec.step("{0} tons/acre x {1} / {2} x {3} acres",
-                                     [base, N(r.relative_yield, 3), N(typical, 4), N(b.acres, 2)],
-                                     "{0}*{1}/{2}*{3}", d, "tons")
-                        else:
-                            rec.step("{0} tons/acre x {1} / {2}", [base, N(r.relative_yield, 3), N(typical, 4)],
-                                     "{0}*{1}/{2}", d, "tons/acre")
-                        out[rec.id] = rec.out(getattr(wr, field))
+                                     unit.replace("tons", "lb") if lb else unit, 0 if lb else d,
+                                     "NASS baseline in tons/acre x relative yield / median relative yield"
+                                     + (" x acres" if with_acres else "") + (" x 2,000 lb/ton" if lb else ""),
+                                     f"Harvest rounded to {'0.01' if with_acres else '0.001'} ton"
+                                     + (", then converted exactly to lb." if lb else "."))
+                        text, ops, expr = harvest_ops(rec, b, r.relative_yield, typical, ctx, req.blocks, with_acres)
+                        t = rec.step(text, ops, expr, unit, d)
+                        if lb:
+                            rec.step("{0} x {1} lb/ton", [t, lb_per_ton(rec)], "{0}*{1}", unit.replace("tons", "lb"), 0)
+                        return rec
 
-            # heat days
+                    tons_value = getattr(wr, field)
+                    out[f"{key}.{field}"] = build(False).out(tons_value, build(True).out(rnd(tons_value * 2000)))
+
             rec = Record(f"{key}.heat_stress_days", f"Heat days, {name}, {r.year}", "days", 0,
-                         "Count of growing days with daily maximum temperature above the crop threshold")
-            rec.inp("Daily maximum temperature", f"{n_active} growing days", "deg C", nasa, url, "nasa")
-            crop_field_input(rec, b.crop, "heat_stress_c", "Heat threshold", params["heat_stress_c"], "deg C")
-            rec.step(f"Growing days from {s.start} to {s.end} with maximum temperature above "
-                     f"{params['heat_stress_c']:g} deg C", [N(s.heat_stress_days, 0)], "{0}", 0, "days")
+                         "Growing days with NASA daily maximum temperature above the crop threshold", "Whole days, no rounding.")
+            hd = rec.inp(f"Growing days above {params['heat_stress_c']:g} deg C (counted from NASA daily maximum)",
+                         s.heat_stress_days, "days", nasa, url, "nasa")
+            rec.step("Heat days counted", [hd], "{0}", "days")
             out[rec.id] = rec.out(r.heat_stress_days)
 
-            # growing degree days
             rec = Record(f"{key}.gdd", f"Growing degree days, {name}, {r.year}", "deg C-days", 0,
-                         "Sum over growing days of max(0, (Tmax + Tmin) / 2 - base temperature)")
-            rec.inp("Daily maximum and minimum temperature", f"{n_active} growing days", "deg C", nasa, url, "nasa")
-            crop_field_input(rec, b.crop, "gdd_base_c", "Base temperature", params["gdd_base_c"], "deg C")
-            g = rec.step(f"Sum over {n_active} growing days of max(0, (Tmax + Tmin) / 2 - {params['gdd_base_c']:g})",
-                         [N(s.gdd, 2)], "{0}", 2, "deg C-days")
-            rec.step("{0} rounded to a whole number", [g], "round({0})", 0, "deg C-days")
+                         "Season sum of max(0, (Tmax + Tmin) / 2 - base temperature)", "Rounded to a whole degree day.")
+            base_entry = reference.get_crop(b.crop)["gdd_base_c"]
+            g = rec.inp(f"Season sum of daily degree days above {params['gdd_base_c']:g} deg C", rnd(s.gdd, 4),
+                        "deg C-days", nasa, url, "model",
+                        "Computed from NASA daily temperatures with a base temperature still marked for checking"
+                        if base_entry.get("verify") else None, "Arithmetic on NASA daily temperatures")
+            rec.step("Season sum", [g], "{0}", "deg C-days", 0)
             out[rec.id] = rec.out(r.gdd)
 
-            # margin
-            if r.profit is not None:
-                out[f"{key}.profit"] = profit_record(f"{key}.profit", b, r, s, ob, bt, prices, utilities, defaults,
-                                                     name, typical)
+            if r.profit is not None and s.money:
+                out[f"{key}.profit"] = profit_record(f"{key}.profit", b, r, s, bt, name, typical)
     return out
 
 
-def profit_record(rid, b, r, s, ob, bt, prices, utilities, defaults, name, typical):
+def profit_record(rid, b, r, s, bt, name, typical):
     from backend import simulate as engine
     req, ctx = bt.request, bt.context
+    m = s.money
+    defaults = engine._price_tables()[2]
+    price = m["price"]
     rec = Record(rid, f"Estimated margin, {name}, {r.year}", "$", 0,
-                 "Sales (baseline yield x acres x price x relative yield / median) minus cost "
-                 "(regional cost x acres + water applied x water price)")
-    base = ctx["baseline_yields"][b.crop]
-    cost = ctx["production_costs"][b.crop]
-    price = engine._lookup_price(prices, b.crop, r.year, req.price_mode, {}, b.crop)
-    elec = engine._lookup_price(utilities, engine.ELECTRICITY_SERIES, r.year, req.price_mode, {}, "electricity")
-    sale_unit = economics.normalize_unit(price.unit).lower()
-    baseline_input(rec, b.crop, ctx)
-    acres_input(rec, b, req.blocks)
+                 "Sales (harvest x price) - cost (production + surface water + groundwater pumping)",
+                 "Harvest to 0.01 ton, acre-ft to 0.0001, cost parts to $0.01, sales and cost to $1.")
+    text, ops, expr = harvest_ops(rec, b, r.relative_yield, typical, ctx, req.blocks, True)
+    tons = rec.step("Harvest: " + text, ops, expr, "tons", 2)
     rows = matching_price("data/reference/prices/crop_prices.csv", "crop", b.crop, price)
     filled = req.price_mode == "historical" and price.year != r.year
-    rec.inp(f"{crop_name(b.crop)} price, {price.year}", price.value, price.unit.replace(" ", ""),
-            f"{rows[0]['source'] if rows else 'crop_prices.csv'}, {price.year}",
-            file_url("data/reference/prices/crop_prices.csv"), "nass",
-            f"Nearest year's price, no NASS price for {r.year}" if filled else None)
-    ry_inputs(rec, b, ob, r.year)
+    sale = m["sale_unit"].lower()
+    p = rec.inp(f"{crop_name(b.crop)} price, {price.year}", price.value, f"$/{sale}",
+                f"{rows[0]['source'] if rows else 'crop_prices.csv'}, {price.year}",
+                file_url("data/reference/prices/crop_prices.csv"), "nass",
+                f"Nearest year's price, no NASS price for {r.year}" if filled else None, money=True)
+    if m["sale_unit"] == "TON":
+        sales = rec.step("Sales: {0} tons x {1} per ton", [tons, p], "{0}*{1}", round_to=0, money=True)
+    elif m["sale_unit"] == "LB":
+        sales = rec.step("Sales: {0} tons x {1} lb/ton x {2} per lb", [tons, lb_per_ton(rec), p], "{0}*{1}*{2}",
+                         round_to=0, money=True)
+    else:
+        w = const(rec, f"{crop_name(b.crop)} weight per {sale}", economics.unit_to_lb(price.unit, b.crop), f"lb/{sale}",
+                  "USDA standard test weight, backend/economics.py BUSHEL_LB", path="backend/economics.py")
+        sales = rec.step(f"Sales: {{0}} tons x {{1}} lb/ton / {{2}} lb/{sale} x {{3}} per {sale}",
+                         [tons, lb_per_ton(rec), w, p], "{0}*{1}/{2}*{3}", round_to=0, money=True)
+
+    cost = ctx["production_costs"][b.crop]
     warn = ""
     for record in records("data/reference/prices/production_costs.csv"):
-        m = re.search(r"(20[0-9]{2})\.pdf", record["source"])
-        if record["crop"] == b.crop and record["region"] == cost["region"] and m and m.group(1) != record["study_year"] \
-                and record["cost_excl_water"] and float(record["cost_excl_water"]) == cost["cost_excl_water"]:
-            warn = f"; study year {record['study_year']} differs from the {m.group(1)} in the file name"
-    away = f"; nearest region with a study ({cost['region']})" if ctx.get("cost_region") and ctx["cost_region"] != cost["region"] else ""
-    rec.inp("Production cost excluding water", cost["cost_excl_water"], "$/acre", cost["source"],
-            file_url("data/reference/prices/production_costs.csv"), "reference",
-            "Regional reference budget from a UC Davis cost study, not this farm's expenses" + away + warn)
-    model_input(rec, f"Water applied {r.year} (unrounded)", round(s.water_applied_af, 4), "acre-ft",
-                "Model estimate from FAO-56 water balance")
-
-    # sales
-    qty = N(base["value"], 3)
-    if economics.normalize_unit(base["unit"]) != economics.normalize_unit(price.unit):
-        f_lb, t_lb = economics.unit_to_lb(base["unit"], b.crop), economics.unit_to_lb(price.unit, b.crop)
-        qty = rec.step(f"Baseline {{0}} {base['unit'].lower()} x {{1}} lb / {{2}} lb per {sale_unit}",
-                       [qty, N(f_lb, 0), N(t_lb, 0)], "{0}*{1}/{2}", 4, f"{sale_unit}/acre")
-    typ = rec.step(f"Typical-year sales: {{0}} {sale_unit}/acre x {{1}} acres x {{2}} per {sale_unit}",
-                   [qty, N(b.acres, 2), N(price.value, 2, True)], "{0}*{1}*{2}", 2, money=True)
-    rev = rec.step("Sales: {0} x {1} / {2}", [typ, N(r.relative_yield, 3), N(typical, 4)], "{0}*{1}/{2}", 2,
-                   money=True, true=s.revenue)
-    # cost
-    prod = rec.step("Production cost: {0} per acre x {1} acres", [N(cost["cost_excl_water"], 2, True), N(b.acres, 2)],
-                    "{0}*{1}", 2, money=True)
+        mm = re.search(r"(20[0-9]{2})\.pdf", record["source"])
+        if (record["crop"] == b.crop and record["region"] == cost["region"] and mm
+                and mm.group(1) != record["study_year"] and record["cost_excl_water"]
+                and float(record["cost_excl_water"]) == cost["cost_excl_water"]):
+            warn = f"; study year {record['study_year']} differs from the {mm.group(1)} in the file name"
+    away = (f"; nearest region with a study ({cost['region']})"
+            if ctx.get("cost_region") and ctx["cost_region"] != cost["region"] else "")
+    pc = rec.inp("Production cost excluding water", cost["cost_excl_water"], "$/acre", cost["source"],
+                 file_url("data/reference/prices/production_costs.csv"), "reference",
+                 "Regional reference budget from a UC Davis cost study, not this farm's expenses" + away + warn, money=True)
+    acres = N(b.acres)
+    parts = [rec.step("Production: {0} per acre x {1} acres", [pc, acres], "{0}*{1}", round_to=2, money=True)]
+    water = model_input(rec, "Water applied (to 0.0001 acre-ft)", m["water"], "acre-ft",
+                        "Model estimate from the FAO-56 daily water balance")
     share = req.optional.surface_water_share
-    share_input(rec, req)
-    parts = []
+    sh = share_input(rec, req)
     if share > 0:
-        water_price_input(rec, ctx)
-        parts.append((N(share, 2), N(ctx["surface_water_price_per_af"], 2)))
-    if share < 1 and elec is not None:
-        rec.inp("Well lift", defaults["well_lift_ft"], "ft",
-                f"defaults.json well_lift_ft: {json_defaults()['well_lift_ft'].get('source', '')}",
-                file_url("data/reference/prices/defaults.json"), "reference",
-                f"Default assumption, {defaults['well_lift_ft']:g} ft well lift")
-        rec.inp("Pump efficiency", defaults["pump_efficiency"], "fraction", "defaults.json pump_efficiency",
-                file_url("data/reference/prices/defaults.json"), "reference",
-                f"Default assumption, {defaults['pump_efficiency']:.0%} pump efficiency")
-        rows = matching_price("data/reference/prices/utilities.csv", "type", engine.ELECTRICITY_SERIES, elec)
-        rec.inp(f"Electricity price, {elec.year}", elec.value, elec.unit,
-                f"{rows[0]['source'] if rows else 'utilities.csv'}, {elec.year}",
-                file_url("data/reference/prices/utilities.csv"), "reference",
-                "California average commercial rate (EIA), not this farm's tariff")
-        rec.inp("Energy to lift 1 acre-ft by 1 ft", economics.KWH_PER_AF_FT, "kWh", "backend/economics.py KWH_PER_AF_FT",
-                file_url("backend/economics.py"), "constant", why_not="Physical constant")
-        kwh = N(elec.value, 2)
-        if economics.normalize_unit(elec.unit) == "CENTS/KWH":
-            kwh = rec.step("Electricity {0} cents/kWh / 100", [kwh], "{0}/100", 4, "$/kWh")
-        pump = rec.step("Pumping: {0} ft x 1.02 kWh / {1} efficiency x {2} $/kWh",
-                        [N(defaults["well_lift_ft"], 0), N(defaults["pump_efficiency"], 2), kwh],
-                        "{0}*1.02/{1}*{2}", 4, "$/acre-ft")
-        parts.append((N(1 - share, 2), pump))
-    if len(parts) == 2:
-        wp = rec.step("Water price: {0} x {1} + {2} x {3}", [parts[0][0], parts[0][1], parts[1][0], parts[1][1]],
-                      "{0}*{1}+{2}*{3}", 4, "$/acre-ft", true=bt.water_cost_per_af[r.year])
-    else:
-        wp = rec.step("Water price: {0} x {1}", list(parts[0]), "{0}*{1}", 4, "$/acre-ft",
-                      true=bt.water_cost_per_af[r.year])
-    water = rec.step("Water cost: {0} acre-ft x {1} $/acre-ft", [N(s.water_applied_af, 4), wp], "{0}*{1}", 2,
-                     money=True)
-    total = rec.step("Cost: {0} + {1}", [prod, water], "{0}+{1}", 2, money=True, true=s.cost)
-    rec.step("Margin: {0} - {1}", [rev, total], "{0}-{1}", 0, money=True, true=s.profit)
+        sw = rec.step("Surface water: {0} acre-ft x {1}", [water, sh], "{0}*{1}", "acre-ft", 4)
+        parts.append(rec.step("Surface water cost: {0} acre-ft x {1} per acre-ft", [sw, water_price_input(rec, ctx)],
+                              "{0}*{1}", round_to=2, money=True))
+    if share < 1:
+        gs = rec.inp("Groundwater share (1 - surface water share)", m["ground_share"], "fraction",
+                     "Rest of the applied water after the surface share", None, "constant",
+                     why_not="Complement of the surface water share")
+        gw = rec.step("Groundwater: {0} acre-ft x {1}", [water, gs], "{0}*{1}", "acre-ft", 4)
+        lift = rec.inp("Well lift", defaults["well_lift_ft"], "ft",
+                       f"defaults.json well_lift_ft: {json_defaults()['well_lift_ft'].get('source', '')}",
+                       file_url("data/reference/prices/defaults.json"), "reference",
+                       f"Default assumption, {defaults['well_lift_ft']:g} ft well lift")
+        kwh_ft = const(rec, "Energy to lift 1 acre-ft by 1 ft", economics.KWH_PER_AF_FT, "kWh/(acre-ft x ft)",
+                       "backend/economics.py KWH_PER_AF_FT", "Physical constant", "backend/economics.py")
+        eff = rec.inp("Pump efficiency", defaults["pump_efficiency"], "fraction", "defaults.json pump_efficiency",
+                      file_url("data/reference/prices/defaults.json"), "reference",
+                      f"Default assumption, {defaults['pump_efficiency']:.0%} pump efficiency")
+        elec = m["elec"]
+        erows = matching_price("data/reference/prices/utilities.csv", "type", engine.ELECTRICITY_SERIES, elec)
+        cents = economics.normalize_unit(elec.unit) == "CENTS/KWH"
+        e = rec.inp(f"Electricity price, {elec.year}", elec.value, "cents/kWh" if cents else "$/kWh",
+                    f"{erows[0]['source'] if erows else 'utilities.csv'}, {elec.year}",
+                    file_url("data/reference/prices/utilities.csv"), "reference",
+                    "California average commercial rate (EIA), not this farm's tariff", money=not cents)
+        if cents:
+            c100 = const(rec, "Cents per dollar", 100, "cents/$", "Definition of the cent", "Unit conversion")
+            e = rec.step("Electricity: {0} cents/kWh / {1} cents per $", [e, c100], "{0}/{1}", "$/kWh")
+        parts.append(rec.step("Groundwater cost: {0} acre-ft x {1} ft x {2} kWh / {3} x {4} per kWh",
+                              [gw, lift, kwh_ft, eff, N(e.value, True)], "{0}*{1}*{2}/{3}*{4}", round_to=2, money=True))
+    total = rec.step("Cost: " + " + ".join("{%d}" % i for i in range(len(parts))), parts,
+                     " + ".join("{%d}" % i for i in range(len(parts))), round_to=0, money=True)
+    rec.step("Margin: sales {0} - cost {1}", [sales, total], "{0}-{1}", money=True)
     return rec.out(r.profit)
 
 
-# ---------------------------------------------------------------- data table average rows
+# ---------------------------------------------------------------- data table rows and Average row
 
 def table_series(response, scope, per_acre):
-    """{metric: [(year, total, divisor)]}: the data table under a chart shows total / divisor
-    (divisor 1 for totals, acres for per acre). total is None when not available."""
+    """{metric: [(year, value or None)]}: the table under a chart, already rounded the way it
+    is displayed (frontend/src/features/provenance/chartData.js builds the same rows).
+
+    Totals: harvest to 0.01 ton, dollars to $1, water to 0.1 acre-ft. Per acre: harvest to
+    0.001 ton, dollars to $1, water to 0.01 acre-ft. Yield is percent to 0.1. Margin is
+    always the shown sales minus the shown cost."""
     weights = {w.block_id: w for w in response.yield_weight}
     rows = {m: [] for m in ("harvest", "sales", "cost", "margin", "water", "yield")}
+
+    def put(y, harvest, sales, cost, water, ry):
+        rows["harvest"].append((y, harvest))
+        rows["sales"].append((y, sales))
+        rows["cost"].append((y, cost))
+        rows["margin"].append((y, sales - cost if sales is not None and cost is not None else None))
+        rows["water"].append((y, water))
+        rows["yield"].append((y, rnd(ry * 100, 1)))
+
     if scope == "farm":
-        total_acres = sum(b.acres for b in response.blocks)
+        total_acres = exact_sum(b.acres for b in response.blocks)
         for t in response.farm_totals:
-            y = t.year
             known = []
             for b in response.blocks:
-                wr = next((r for r in weights[b.id].yearly if r.year == y), None) if b.id in weights else None
+                wr = next((r for r in weights[b.id].yearly if r.year == t.year), None) if b.id in weights else None
                 if wr is not None and wr.tons is not None:
                     known.append((b.acres, wr.tons))
-            m_acres = sum(b.acres for b in response.blocks
-                          if next(r for r in b.yearly if r.year == y).profit is not None)
-            h = sum(v for _, v in known) if known else None
-            rows["harvest"].append((y, h, sum(a for a, _ in known) if per_acre else 1))
-            for m, v in (("sales", t.revenue), ("cost", t.cost), ("margin", t.profit)):
-                rows[m].append((y, v, m_acres if per_acre else 1))
-            rows["water"].append((y, t.water_applied_af, total_acres if per_acre else 1))
-            rows["yield"].append((y, t.relative_yield * 100, 1))
+            h = rnd(exact_sum(v for _, v in known), 2) if known else None  # 0.01-ton values, exact after rounding
+            m_acres = exact_sum(b.acres for b in response.blocks
+                          if next(r for r in b.yearly if r.year == t.year).profit is not None)
+            if per_acre:
+                h_acres = exact_sum(a for a, _ in known)
+                put(t.year, rnd(h / h_acres, 3) if h is not None else None,
+                    rnd(t.revenue / m_acres) if t.revenue is not None else None,
+                    rnd(t.cost / m_acres) if t.cost is not None else None,
+                    rnd(t.water_applied_af / total_acres, 2), t.relative_yield)
+            else:
+                put(t.year, h, t.revenue, t.cost, t.water_applied_af, t.relative_yield)
         return rows
     b = next(x for x in response.blocks if x.id == scope)
     w = weights.get(scope)
-    div = b.acres if per_acre else 1
     for r in b.yearly:
         wr = next((x for x in w.yearly if x.year == r.year), None) if w else None
-        rows["harvest"].append((r.year, (wr.tons_per_acre if per_acre else wr.tons) if wr else None, 1))
-        for m, v in (("sales", r.revenue), ("cost", r.cost), ("margin", r.profit)):
-            rows[m].append((r.year, v, div))
-        rows["water"].append((r.year, r.water_applied_af, div))
-        rows["yield"].append((r.year, r.relative_yield * 100, 1))
+        if per_acre:
+            put(r.year, wr.tons_per_acre if wr else None,
+                rnd(r.revenue / b.acres) if r.revenue is not None else None,
+                rnd(r.cost / b.acres) if r.cost is not None else None,
+                rnd(r.water_applied_af / b.acres, 2), r.relative_yield)
+        else:
+            put(r.year, wr.tons if wr else None, r.revenue, r.cost, r.water_applied_af, r.relative_yield)
     return rows
 
 
-TABLE_DECIMALS = {"harvest": 4, "sales": 2, "cost": 2, "margin": 2, "water": 2, "yield": 2}
-TABLE_INPUT_DECIMALS = {"harvest": 2, "sales": 0, "cost": 0, "margin": 0, "water": 1, "yield": 1}
-TABLE_REASONS = {
-    "harvest": "Model estimate: NASS median yield scaled by modeled relative yield",
-    "water": "Model estimate from FAO-56 water balance",
-    "yield": "Model estimate from FAO-33 yield response and FAO-56 water balance"}
-MONEY_REASON = "Model estimate: modeled harvest x NASS price, regional study cost plus modeled water"
+TABLE_DECIMALS = {(m, pa): d for m, d_total, d_acre in (
+    ("harvest", 2, 3), ("sales", 0, 0), ("cost", 0, 0), ("margin", 0, 0), ("water", 1, 2), ("yield", 1, 1),
+    ("margin_pct", 1, 1)) for pa, d in ((False, d_total), (True, d_acre))}
+TABLE_UNITS = {"harvest": "tons", "sales": "$", "cost": "$", "margin": "$", "water": "acre-ft", "yield": "%",
+               "margin_pct": "%"}
+TABLE_REASONS = {"harvest": "Model estimate: NASS median yield scaled by modeled relative yield",
+                 "water": "Model estimate from the FAO-56 water balance",
+                 "yield": "Model estimate from FAO-33 yield response and FAO-56 water balance"}
 
 
 def table_average(response, req, scope, per_acre, metric):
-    """Average row cell: (Record, N) or None when the column has no values."""
-    rows = [(y, t, dv) for y, t, dv in table_series(response, scope, per_acre)[metric]
-            if t is not None and dv]
-    if not rows:
-        return None
+    """Average row cell. Returns the record dict, or (tons record, lb record) for harvest,
+    or None when the column has no values."""
+    series = table_series(response, scope, per_acre)
     b = next((x for x in req.blocks if x.id == scope), None)
     who = "whole farm" if scope == "farm" else block_name(b, req.blocks)
-    money = metric in ("sales", "cost", "margin")
-    divided = per_acre and any(dv != 1 for _, _, dv in rows)
-    base_unit = {"harvest": "tons", "water": "acre-ft", "yield": "%"}.get(metric, "$")
-    unit = base_unit + ("/acre" if per_acre and metric != "yield" else "")
-    d, d_in = TABLE_DECIMALS[metric], TABLE_INPUT_DECIMALS[metric]
-    if metric == "harvest" and per_acre and scope != "farm":
-        d_in = 3  # block harvest per acre comes straight from yield_weight tons_per_acre
-    years = [y for y, _, _ in rows]
-    label = METRIC_LABELS[metric].lower()
-    rec = Record(f"table.{scope}.{'per_acre' if per_acre else 'total'}.{metric}",
-                 f"Average {label}{' per acre' if unit.endswith('/acre') else ''}, {who}", unit, d,
-                 f"Sum of the yearly {label} values / number of years with a value, {years_text(years)}"
-                 + (" / acres" if divided else ""))
+    basis = "per_acre" if per_acre else "total"
+    rid = f"table.{scope}.{basis}.{metric}"
+    d = TABLE_DECIMALS[(metric, per_acre)]
+    unit = TABLE_UNITS[metric] + ("/acre" if per_acre and metric not in ("yield", "margin_pct") else "")
+    money = TABLE_UNITS[metric] == "$"
+    per = " per acre" if unit.endswith("/acre") else ""
+    label = f"Average {METRIC_LABELS[metric]}{per}, {who}"
+    rule = {"harvest": f"Harvest rounded to {'0.001' if per_acre else '0.01'} ton.",
+            "water": f"Water rounded to {'0.01' if per_acre else '0.1'} acre-ft.",
+            "yield": "Percent rounded to 0.1.", "margin_pct": "Percent rounded to 0.1."}.get(metric, ROUND_MONEY)
     reason = TABLE_REASONS.get(metric, MONEY_REASON)
-    series_input(rec, f"Yearly {label}, {who}", [(y, t) for y, t, _ in rows], d_in, base_unit if money is False else "$",
-                 reason, money)
-    divs = {dv for _, _, dv in rows}
-    if divided and len(divs) == 1:
-        acres = divs.pop()
-        rec.inp("Area for per acre values", acres, "acres",
-                FARMER if scope != "farm" else "Farmer input: sum of the crop entry areas in this column",
-                kind="farmer")
-        v = average_steps(rec, [(y, t) for y, t, _ in rows], d_in, d, unit, money, divisor=acres, d_mid=d + 2)
-    elif divided:
-        rec.inp("Area for per acre values", "varies by year", "acres",
-                "Farmer input: sum of the crop entry areas in this column", kind="farmer")
-        v = average_steps(rec, [(y, t / dv) for y, t, dv in rows], 4, d, unit, money)
-    else:
-        v = average_steps(rec, [(y, t) for y, t, _ in rows], d_in, d, unit, money)
-    return rec, v
+
+    if metric == "margin_pct":
+        avg_s = table_average(response, req, scope, per_acre, "sales")
+        avg_m = table_average(response, req, scope, per_acre, "margin")
+        if not avg_s or not avg_m or not avg_s["value"]:
+            return None
+        rec = Record(rid, label, "%", d, "Average margin / average sales x 100", rule)
+        mg = model_input(rec, f"Average margin{per}", avg_m["value"], unit.replace("%", "$"), "From the Average row", True)
+        sl = model_input(rec, f"Average sales{per}", avg_s["value"], unit.replace("%", "$"), "From the Average row", True)
+        v = rec.step("{0} / {1} x {2}", [mg, sl, percent_factor(rec)], "{0}/{1}*{2}", "%", d)
+        return rec.out(v.value)
+    if metric == "margin":
+        sales = [(y, v) for y, v in series["sales"] if v is not None]
+        costs = [(y, v) for y, v in series["cost"] if v is not None]
+        if not sales or not costs:
+            return None
+        rec = Record(rid, label, unit, d, f"Average sales{per} - average cost{per}, {years_text([y for y, _ in sales])}",
+                     rule + " Averages first, then subtracted.")
+        s_ops = yearly_inputs(rec, f"Sales{per}", sales, unit, reason, True)
+        c_ops = yearly_inputs(rec, f"Cost{per}", costs, unit, reason, True)
+        n = count_input(rec, len(sales))
+        sa = rec.step("Average sales: {0} / {1} years", [sum_step(rec, s_ops, money=True, what="yearly sales values"), n],
+                      "{0}/{1}", round_to=0, money=True)
+        ca = rec.step("Average cost: {0} / {1} years", [sum_step(rec, c_ops, money=True, what="yearly cost values"), n],
+                      "{0}/{1}", round_to=0, money=True)
+        v = rec.step("Margin: {0} - {1}", [sa, ca], "{0}-{1}", money=True)
+        return rec.out(v.value)
+    pairs = [(y, v) for y, v in series[metric] if v is not None]
+    if not pairs:
+        return None
+    years = years_text([y for y, _ in pairs])
+
+    def build(lb):
+        rec = Record(rid, label, unit.replace("tons", "lb") if lb else unit, 0 if lb else d,
+                     f"Sum of the yearly {METRIC_LABELS[metric]}{per} values / number of years with a value, {years}"
+                     + (" x 2,000 lb/ton" if lb else ""), rule + (" Pounds to the nearest lb." if lb else ""))
+        ops = yearly_inputs(rec, f"{METRIC_LABELS[metric].capitalize()}{per}", pairs,
+                            unit if metric != "yield" else "%", reason, money)
+        if lb:
+            average_steps(rec, ops, 0, unit.replace("tons", "lb"), scale=lb_per_ton(rec))
+        else:
+            average_steps(rec, ops, d, unit if not money else "", money)
+        return rec
+
+    tons_rec = build(False)
+    tons_out = tons_rec.out(tons_rec.steps[-1]["result"])
+    if metric != "harvest":
+        return tons_out
+    lb_rec = build(True)
+    return tons_out, lb_rec.out(lb_rec.steps[-1]["result"])
 
 
 def table_records(response, req, ctx):
     out = {}
     for scope in ["farm"] + [b.id for b in response.blocks]:
-        b = next((x for x in req.blocks if x.id == scope), None)
-        who = "whole farm" if scope == "farm" else block_name(b, req.blocks)
         for per_acre in (False, True):
-            avgs = {}
-            for metric in ("harvest", "sales", "cost", "margin", "water", "yield"):
+            for metric in ("harvest", "sales", "cost", "margin", "water", "yield", "margin_pct"):
                 found = table_average(response, req, scope, per_acre, metric)
-                if found:
-                    rec, v = found
-                    avgs[metric] = v
-                    out[rec.id] = rec.out(round(v.v, rec.decimals) + 0.0)
-            if "margin" in avgs and "sales" in avgs and avgs["sales"].v:
-                rid = f"table.{scope}.{'per_acre' if per_acre else 'total'}.margin_pct"
-                rec = Record(rid, f"Average margin percent, {who}", "%", 2, "Average margin / average sales x 100")
-                model_input(rec, "Average margin", round(avgs["margin"].v, 2), "$", "Model estimate from the backtest")
-                model_input(rec, "Average sales", round(avgs["sales"].v, 2), "$", "Model estimate from the backtest")
-                v = rec.step("{0} / {1} x 100", [avgs["margin"], avgs["sales"]], "{0}/{1}*100", 2, "%")
-                out[rid] = rec.out(round(v.v, 2) + 0.0)
+                if found is None:
+                    continue
+                if isinstance(found, tuple):
+                    found = {**found[0], "lb": found[1]}
+                out[found["id"]] = found
     return out
 
 
@@ -851,27 +913,18 @@ def plan_block_records(blocks, resp, ctx):
         pairs = [(r.year, r.profit) for r in ob.yearly if r.profit is not None]
         if pairs:
             rec = Record(f"block.{b.id}.avg_profit", f"Average margin, {name}", "$", 0,
-                         f"Sum of yearly margins of this crop entry / number of years, {yr}")
-            series_input(rec, f"Yearly margin, {name}", pairs, 0, "$",
-                         "Model estimate: modeled harvest x NASS price, regional study cost plus modeled water", True)
-            average_steps(rec, pairs, 0, 0, "", money=True)
-            out[rec.id] = rec.out(round(sum(v for _, v in pairs) / len(pairs)))
+                         f"Sum of yearly margins of this crop entry / number of years, {yr}", ROUND_MONEY)
+            ops = yearly_inputs(rec, f"Margin, {name}", pairs, "$", MONEY_REASON, True)
+            average_steps(rec, ops, 0, money=True)
+            out[rec.id] = rec.out(rnd(mean(v for _, v in pairs)))
         w = weights.get(b.id)
         if w is not None and w.avg_tons is not None:
+            tons = [(r.year, r.tons) for r in w.yearly if r.tons is not None]
             rec = Record(f"block.{b.id}.avg_yield_tons", f"Average harvest, {name}", "tons", 2,
-                         "NASS median yield in tons/acre x average relative yield / median relative yield x acres")
-            baseline_input(rec, b.crop, ctx)
-            acres_input(rec, b, blocks)
-            ry_inputs(rec, b, ob)
-            series_input(rec, "Yearly relative yield", [(r.year, r.relative_yield) for r in ob.yearly], 3, "fraction",
-                         "Model estimate from FAO-33 yield response and FAO-56 water balance")
-            base = baseline_tons_steps(rec, b.crop, ctx)
-            ry = [r.relative_yield for r in ob.yearly]
-            ops = [N(v, 3) for v in ry]
-            s = rec.step(f"Sum of {len(ops)} relative yields", ops, " + ".join("{%d}" % i for i in range(len(ops))), 3)
-            m = rec.step("{0} / {1} years", [s, N(len(ry), 0)], "{0}/{1}", 6)
-            rec.step("{0} tons/acre x {1} / {2} x {3} acres", [base, m, N(typical_ry(ob), 4), N(b.acres, 2)],
-                     "{0}*{1}/{2}*{3}", 2, "tons")
+                         f"Sum of yearly harvest of this crop entry / number of years, {yr}",
+                         "Harvest rounded to 0.01 ton.")
+            ops = yearly_inputs(rec, f"Harvest, {name}", tons, "tons", TABLE_REASONS["harvest"])
+            average_steps(rec, ops, 2, "tons")
             out[rec.id] = rec.out(w.avg_tons)
     return out
 
@@ -885,10 +938,12 @@ def difference_records(plan_stats, current_stats, plan_calcs, current_calcs):
         p, c = getattr(plan_stats, key), getattr(current_stats, key)
         if p is None or c is None:
             continue
-        rec = Record(f"difference.{key}", label, unit, d, "Plan average minus current farm average, per year")
-        for who, v, calcs in (("Plan", p, plan_calcs), ("Current farm", c, current_calcs)):
-            rec.inp(f"{who} average", v, unit, f"{who} backtest, summary_stats.{key}",
-                    file_url("backend/optimize.py"), "model", "Model estimate from the backtest")
-        rec.step("{0} - {1}", [N(p, d, money), N(c, d, money)], "{0}-{1}", d, "" if money else unit, money)
-        out[rec.id] = rec.out(round(p - c, d) + 0.0)
+        rec = Record(f"difference.{key}", label, unit, d, "Plan average minus current farm average, per year",
+                     ROUND_MONEY if money else f"Rounded to {10 ** -d:g} {unit}.")
+        pn = rec.inp("Plan average", p, unit, f"Plan backtest, summary_stats.{key}", file_url("backend/optimize.py"),
+                     "model", "Model estimate from the backtest", money=money)
+        cn = rec.inp("Current farm average", c, unit, f"Current farm backtest, summary_stats.{key}",
+                     file_url("backend/optimize.py"), "model", "Model estimate from the backtest", money=money)
+        rec.step("{0} - {1}", [pn, cn], "{0}-{1}", "" if money else unit, d, money)
+        out[rec.id] = rec.out(rnd(p - c, d))
     return out

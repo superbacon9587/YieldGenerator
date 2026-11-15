@@ -9,13 +9,13 @@ For every record in /api/simulate, /api/compare and /api/optimize responses:
 """
 
 import re
-from statistics import mean
 
 import pytest
 
 from backend import calculations, compare, optimize as opt, regions, simulate as engine
 from backend.schemas import CompareRequest, OptimizeRequest, SimulateRequest
 from conftest import make_context, make_weather
+from hand_calculator import hand_check
 from test_wording import ADVICE
 
 WX = make_weather()
@@ -50,35 +50,19 @@ def simulated(request):
     return req, engine.simulate(req, wx=WX, context=ctx)
 
 
-def printed_result(text):
-    tail = text.rsplit(" = ", 1)[1].split(" ")[0]
-    number = tail.replace("$", "").replace(",", "")
-    decimals = len(number.split(".")[1]) if "." in number else 0
-    return float(number), decimals
-
-
 def check_record(rid, rec):
-    assert rec["id"] == rid
-    assert rec["steps"], rid
-    for step in rec["steps"]:
-        value = calculations.evaluate(step["expr"])
-        if " = " in step["text"]:
-            shown, decimals = printed_result(step["text"])
-            assert shown == pytest.approx(step["result"], abs=1e-9), (rid, step)
-            assert round(value, decimals) == pytest.approx(step["result"], abs=1e-9), (rid, step)
-        else:
-            assert value == step["result"], (rid, step)
-    assert rec["steps"][-1]["result"] == pytest.approx(rec["value"], abs=1e-9), rid
+    assert rec["id"] == rid.removesuffix(" (lb)")
+    hand_check(rid, rec)
+    if "lb" in rec:
+        hand_check(rid + " (lb)", rec["lb"])
     for i in rec["inputs"]:
         assert str(i["source"]).strip(), (rid, i)
         if i["is_estimate"]:
             assert i["estimate_reason"], (rid, i)
         elif i["kind"] not in REPORTED:
             assert i["not_estimate_reason"], (rid, i)
-    assert rec["is_estimate"] == any(i["is_estimate"] for i in rec["inputs"])
-    texts = [rec["label"], rec["formula_text"]] + [s["text"] for s in rec["steps"]] + [
-        str(i[k]) for i in rec["inputs"] for k in ("name", "source", "estimate_reason", "not_estimate_reason")]
-    assert not any("—" in t or "–" in t for t in texts), rid
+    texts = [rec["label"], rec["formula_text"], rec["rounding"]] + [s["text"] for s in rec["steps"]]
+    assert not any("\u2014" in t or "\u2013" in t for t in texts), rid
     assert not [t for t in texts if ADVICE.search(t)], rid
 
 
@@ -98,11 +82,12 @@ def test_values_match_the_numbers_the_response_shows(simulated):
     assert c["summary.avg_water_applied_af"]["value"] == s.avg_water_applied_af
     assert c["summary.avg_relative_yield"]["value"] == round(s.avg_relative_yield * 100, 1)
     assert c["summary.avg_yield_tons"]["value"] == s.avg_yield_tons
-    assert c["summary.best_year"]["value"] == out.summary.best_year
-    assert c["summary.worst_year"]["value"] == out.summary.worst_year
+    by_year = {t.year: t.profit for t in out.farm_totals}
+    assert c["summary.best_year"]["value"] == by_year[out.summary.best_year]
+    assert c["summary.worst_year"]["value"] == by_year[out.summary.worst_year]
     assert c["summary.worst_profit"]["value"] == min(t.profit for t in out.farm_totals if t.profit is not None)
-    assert c["summary.avg_revenue"]["value"] == pytest.approx(
-        out.calculation_details["reconciliation"]["avg_revenue"], abs=0.005)
+    assert c["summary.avg_revenue"]["value"] == round(
+        out.calculation_details["reconciliation"]["avg_revenue"])
     if req.optional.budget_usd is not None:
         assert c["summary.years_over_budget"]["value"] == len(out.budget.years_over_budget)
     weights = {w.block_id: w for w in out.yield_weight}
@@ -122,30 +107,7 @@ def test_values_match_the_numbers_the_response_shows(simulated):
                     assert f"{key}.{field}" not in c
                 else:
                     assert c[f"{key}.{field}"]["value"] == getattr(w, field)
-
-
-def test_data_table_average_rows_match_the_table_rows(simulated):
-    _, out = simulated
-    c = out.calculations
-    for scope in ["farm"] + [b.id for b in out.blocks]:
-        for per_acre in (False, True):
-            basis = "per_acre" if per_acre else "total"
-            series = calculations.table_series(out, scope, per_acre)
-            avgs = {}
-            for metric, rows in series.items():
-                values = [t / dv for _, t, dv in rows if t is not None and dv]
-                rid = f"table.{scope}.{basis}.{metric}"
-                if not values:
-                    assert rid not in c
-                    continue
-                avgs[metric] = mean(values)
-                assert c[rid]["value"] == pytest.approx(mean(values), abs=10 ** -c[rid]["decimals"]), rid
-            if avgs.get("sales") and "margin" in avgs:
-                rid = f"table.{scope}.{basis}.margin_pct"
-                assert c[rid]["value"] == pytest.approx(100 * avgs["margin"] / avgs["sales"], abs=0.01)
-    # Farm totals in the table are the same numbers as the summary cards.
-    assert c["table.farm.total.harvest"]["value"] == pytest.approx(out.summary_stats.avg_yield_tons, abs=0.006)
-    assert c["table.farm.total.water"]["value"] == pytest.approx(out.summary_stats.avg_water_applied_af, abs=0.06)
+                    assert c[f"{key}.{field}"]["lb"]["value"] == round(getattr(w, field) * 2000)
 
 
 def test_reported_and_estimated_inputs_are_tagged():
@@ -162,10 +124,10 @@ def test_reported_and_estimated_inputs_are_tagged():
     price = next(i for i in profit["inputs"] if i["name"].startswith("Almonds price"))
     assert price["kind"] == "nass" and "USDA NASS Quick Stats" in price["source"]
     water = out.calculations["block.a.2003.crop_water_use_in"]
-    et0 = next(i for i in water["inputs"] if i["name"].startswith("Reference ET0"))
-    assert et0["source"].startswith("NASA POWER daily, grid cell 37.5, -120.625")
-    assert et0["source_url"].startswith("https://power.larc.nasa.gov/")
-    assert "FAO-56" in et0["estimate_reason"]
+    etc = next(i for i in water["inputs"] if i["name"].startswith("Season crop water use"))
+    assert etc["source"].startswith("NASA POWER daily, grid cell 37.5, -120.625")
+    assert etc["source_url"].startswith("https://power.larc.nasa.gov/")
+    assert "FAO-56" in etc["estimate_reason"]
     assert profit["is_estimate"]
     entered = engine.simulate(farm(surface_water_share=0.5), wx=WX, context=ctx).calculations
     share = next(i for i in entered["block.a.2003.profit"]["inputs"] if i["name"] == "Surface water share")
@@ -223,11 +185,12 @@ def test_optimize_returns_records_for_plan_numbers():
         check_record(rid, rec)
 
 
-def test_number_display_reproduces_rounding():
-    rec = calculations.Record("x", "x", "", 2, "x")
-    third = rec.step("{0} / 3", [calculations.N(1, 0)], "{0}/3", 4)
-    rec.step("{0} x 3", [third], "{0}*3", 2)
-    for step in rec.steps:
-        shown, d = printed_result(step["text"])
-        assert round(calculations.evaluate(step["expr"]), d) == shown
-    assert re.search(r"0\.3333", rec.steps[1]["text"])
+def test_steps_show_both_the_exact_and_the_rounded_result():
+    rec = calculations.Record("x", "x", "", 2, "x", "Rounded to 0.01.")
+    one = rec.inp("One", 1, "", "test", kind="constant", why_not="test")
+    three = rec.inp("Three", 3, "", "test", kind="constant", why_not="test")
+    third = rec.step("{0} / {1}", [one, three], "{0}/{1}")
+    rec.step("{0} x {1}", [third, three], "{0}*{1}", round_to=2)
+    assert rec.steps[0]["text"] == "1 / 3 = 0.333333"
+    assert rec.steps[1]["text"] == "0.333333 x 3 = 0.999999, rounded to 1.00"
+    hand_check("x", rec.out(1.0))

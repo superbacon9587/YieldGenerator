@@ -11,13 +11,13 @@ import { chartRows, labelsFit, weightByBlock } from "./yieldData.js";
 import { generateMock } from "../../mock/generate.js";
 
 test("weights format in tons and pounds", () => {
-  assert.equal(formatWeight(1.157, "tons", true), "1.16 tons/acre");
+  assert.equal(formatWeight(1.157, "tons", true), "1.157 tons/acre");
   assert.equal(formatWeight(1.157, "lb", true), "2,314 lb/acre");
   assert.equal(formatWeight(17.4, "lb", false), "34,800 lb");
   assert.equal(formatWeight(null, "tons", true), "No yield data");
   assert.equal(
     weightWithPotential(1.16, 0.934, "tons", true),
-    "1.16 tons/acre, 93% of potential",
+    "1.160 tons/acre, 93% of potential",
   );
   assert.equal(potentialPercent(undefined), null);
   assert.equal(formatAxisTick(3600, "lb"), "7.2M");
