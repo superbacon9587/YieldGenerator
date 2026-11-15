@@ -82,7 +82,8 @@ from statistics import median
 import numpy as np
 import pandas as pd
 
-from backend import economics, reference, waste, yield_weight
+from backend import economics, reference, units, waste, yield_weight
+from backend.rounding import rnd
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
@@ -377,6 +378,7 @@ class BlockSeason:
     capped: bool = False
     revenue: float | None = None
     cost: float | None = None
+    money: dict | None = None     # the rounded parts behind revenue and cost (apply_money)
 
     @property
     def profit(self) -> float | None:
@@ -570,19 +572,55 @@ def _lookup_price(table: economics.PriceTable, key: str, year: int, mode: str,
     return None
 
 
-def apply_money(bt: Backtest, ctx: dict) -> None:
-    """Fill revenue and cost on every season, and water cost per acre-ft per year."""
+def sale_quantity(tons: float, price_unit: str, crop: str) -> tuple[float, str]:
+    """Harvest in the price's unit, with the arithmetic used: 'TON', 'LB' or 'BU'.
+
+    The order of operations matches the calculation records exactly."""
+    u = economics.normalize_unit(price_unit)
+    if u == "TON":
+        return tons, u
+    if u == "LB":
+        return tons * units.LB_PER_TON, u
+    return tons * units.LB_PER_TON / economics.unit_to_lb(price_unit, crop), u
+
+
+def kwh_price(elec: economics.Price) -> float:
+    """Electricity in $ per kWh. Cents are divided by 100, as the records show."""
+    if economics.normalize_unit(elec.unit) == "CENTS/KWH":
+        return elec.value / 100
+    return elec.value
+
+
+def apply_money(bt: Backtest, ctx: dict, rounded: bool = True) -> None:
+    """Fill revenue and cost on every season, and water cost per acre-ft per year.
+
+    Displayed results (rounded=True) follow the steps a person can redo by hand:
+        harvest tons = baseline tons/acre x relative yield / median x acres, to 0.01 ton
+        sales        = harvest in the price unit x price, to $1
+        water        = water applied to 0.0001 acre-ft, split by the surface share
+        cost         = production cost/acre x acres
+                       + surface acre-ft x surface $/acre-ft
+                       + groundwater acre-ft x lift ft x 1.02 kWh / pump efficiency x $/kWh
+                       (each part to $0.01), total to $1
+        margin       = sales - cost
+    The optimizer prices 1-acre options with rounded=False so its per-acre values stay
+    linear in acres; it then checks every plan against the rounded engine.
+    """
     req = bt.request
     crop_prices, utilities, defaults = _price_tables()
     mode = req.price_mode
     share = req.optional.surface_water_share
+    ground = rnd(1 - share, 6)
     sw_price = ctx.get("surface_water_price_per_af")
     lift, pump_eff = defaults["well_lift_ft"], defaults["pump_efficiency"]
     notes: dict[str, None] = {}  # ordered set
+    r = rnd if rounded else (lambda x, d=0: x)
 
     pump_cost: dict[int, float | None] = {}
+    elec_by_year: dict[int, economics.Price | None] = {}
     for y in bt.years:
         elec = _lookup_price(utilities, ELECTRICITY_SERIES, y, mode, notes, "electricity")
+        elec_by_year[y] = elec
         pump_cost[y] = (economics.pumping_cost_per_af(lift, pump_eff, elec.value, elec.unit)
                         if elec else None)
         sw_part = share * sw_price if sw_price is not None else (0.0 if share == 0 else None)
@@ -598,25 +636,44 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
         relative = [round(bt.seasons[b.id][y].relative_yield, 3) for y in bt.years]
         typical = median(relative)
         missing: dict[str, None] = {}
+        try:
+            base_tpa = units.to_tons_per_acre(base["value"], base["unit"], b.crop) if base else None
+        except units.UnknownUnitError:
+            base_tpa = None
         if not typical:
             missing["nonzero median modeled yield"] = None
-        if base is None:
+        if base_tpa is None:
             missing["baseline yield"] = None
         if prod is None:
             missing["production cost"] = None
         for y, s in bt.seasons[b.id].items():
             price = _lookup_price(crop_prices, b.crop, y, mode, notes, label)
+            elec = elec_by_year[y]
             if price is None:
                 missing["crop price"] = None
             if bt.water_cost_per_af[y] is None:
                 missing["water price"] = None
-            if price is None or base is None or prod is None or bt.water_cost_per_af[y] is None or not typical:
-                s.revenue = s.cost = None
+            if price is None or base_tpa is None or prod is None or bt.water_cost_per_af[y] is None or not typical:
+                s.revenue = s.cost = s.money = None
                 continue
-            per_acre = economics.convert_quantity(base["value"], base["unit"], price.unit, b.crop)
-            s.revenue = round(s.relative_yield, 3) / typical * per_acre * b.acres * price.value
-            s.cost = (prod["cost_excl_water"] * b.acres
-                      + s.water_applied_af * bt.water_cost_per_af[y])
+            tons = r(base_tpa * round(s.relative_yield, 3) / typical * b.acres, 2)
+            qty, sale_unit = sale_quantity(tons, price.unit, b.crop)
+            revenue_exact = qty * price.value
+            water = r(s.water_applied_af, 4)
+            sw_af, gw_af = r(water * share, 4), r(water * ground, 4)
+            production = r(prod["cost_excl_water"] * b.acres, 2)
+            surface = r(sw_af * sw_price, 2) if share > 0 else 0.0
+            kwh = kwh_price(elec) if share < 1 else None
+            groundwater = (r(gw_af * lift * economics.KWH_PER_AF_FT / pump_eff * kwh, 2)
+                           if share < 1 else 0.0)
+            cost_exact = production + surface + groundwater
+            s.revenue = r(revenue_exact, 0)
+            s.cost = r(cost_exact, 0)
+            s.money = {"tons": tons, "qty": qty, "sale_unit": sale_unit, "price": price,
+                       "revenue_exact": revenue_exact, "water": water, "sw_af": sw_af,
+                       "gw_af": gw_af, "ground_share": ground, "production": production,
+                       "surface": surface, "groundwater": groundwater, "kwh": kwh, "elec": elec,
+                       "cost_exact": cost_exact, "typical": typical}
         if missing:
             notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
                   "cost, and profit are shown as no data."] = None
@@ -646,7 +703,7 @@ def _block_year_out(s: BlockSeason) -> BlockYearOut:
         crop_water_use_in=round(s.crop_water_use_in, 1),
         effective_rain_in=round(s.effective_rain_in, 1),
         irrigation_need_af=round(s.irrigation_need_af, 1),
-        water_applied_af=round(s.water_applied_af, 1),
+        water_applied_af=rnd(s.water_applied_af, 1),
         relative_yield=round(s.relative_yield, 3),
         heat_stress_days=s.heat_stress_days,
         gdd=round(s.gdd),
@@ -694,7 +751,8 @@ def build_response(bt: Backtest) -> SimulateResponse:
                     left_out[f"{s.block_id} ({s.crop.replace('_', ' ')})"] = None
         farm.append(FarmYearOut(
             year=y,
-            water_applied_af=round(sum(s.water_applied_af for s in ss), 1),
+            # Farm rows are sums of the displayed crop rows, so they add up by hand.
+            water_applied_af=rnd(sum(rnd(s.water_applied_af, 1) for s in ss), 1),
             relative_yield=round(sum(s.relative_yield * s.acres for s in ss) / total_acres, 3),
             revenue=_sum_or_none([s.revenue for s in with_money]),
             cost=_sum_or_none([s.cost for s in with_money]),
@@ -751,7 +809,10 @@ def simulate(request: SimulateRequest, wx: pd.DataFrame | None = None,
         response.comparisons = build_comparisons(request, response, wx=wx, context=ctx)
     from backend import summary
     response = summary.add_to_response(response, request, ctx)
+    from backend import calculations
     if include_comparisons:
-        from backend import calculations
         response.calculation_details = calculations.build(bt, response, wx)
+        response.calculations = calculations.simulate_records(bt, response, wx)
+    else:  # compare and optimize only show whole-period numbers
+        response.calculations = calculations.summary_records(response, request, ctx)
     return response

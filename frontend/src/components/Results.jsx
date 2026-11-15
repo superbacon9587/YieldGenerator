@@ -38,14 +38,14 @@ import {
 } from "../domain.js";
 import { simulate } from "../api.js";
 import Timeline from "./Timeline.jsx";
-import {
-  CalculationProvider,
-  MetricInfo,
-  MoneyExplanation,
-} from "../features/provenance/CalculationDetails.jsx";
+import { CalcInfo, CalcRecords } from "../features/provenance/CalcPopover.jsx";
+import MoneyExplanation from "../features/provenance/MoneyExplanation.jsx";
+import { differenceRecord } from "../features/provenance/calcRecords.js";
+import ChartDataTable from "../features/summary/ChartDataTable.jsx";
+import { formatCell, getChartRows } from "../features/provenance/chartData.js";
 import YieldWeightChart from "../features/yield/YieldWeightChart.jsx";
 import { useYieldUnit } from "../features/yield/YieldUnitContext.jsx";
-import { weightByBlock, weightRow } from "../features/yield/yieldData.js";
+import { blockLabel, weightByBlock, weightRow } from "../features/yield/yieldData.js";
 import {
   formatWeight,
   potentialPercent,
@@ -79,9 +79,27 @@ function download(data) {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+// Comparison rows read the backend calculation record when there is one, so each
+// cell, the difference, and their popovers use the same rounded numbers.
+const COMPARE_RECORDS = {
+  water: ["summary.avg_water_applied_af", 1],
+  yield: ["summary.avg_relative_yield", 0.01],
+  profit: ["summary.avg_profit", 1],
+  worstProfit: ["summary.worst_profit", 1],
+};
+function comparisonValues(result) {
+  const fallback = summaryMetrics(result);
+  return Object.fromEntries(
+    Object.entries(COMPARE_RECORDS).map(([key, [id, scale]]) => {
+      const r = result.calculations?.[id];
+      return [key, r && Number.isFinite(r.value) ? r.value * scale : fallback[key]];
+    }),
+  );
+}
 function Comparison({ base, result }) {
-  const a = summaryMetrics(base),
-    b = summaryMetrics(result);
+  const a = comparisonValues(base),
+    b = comparisonValues(result);
+  const rec = (response, key) => response.calculations?.[COMPARE_RECORDS[key][0]];
   const rows = [
     ["Applied water / year", "water", (v) => `${number(v, 1)} acre-ft`, false],
     ["Area-weighted relative yield", "yield", percent, true],
@@ -115,8 +133,14 @@ function Comparison({ base, result }) {
             return (
               <tr key={key}>
                 <th>{label}</th>
-                <td>{format(a[key])}</td>
-                <td>{format(b[key])}</td>
+                <td>
+                  {format(a[key])}
+                  <CalcInfo record={rec(base, key)} display={format(a[key])} />
+                </td>
+                <td>
+                  {format(b[key])}
+                  <CalcInfo record={rec(result, key)} display={format(b[key])} />
+                </td>
                 <td
                   className={
                     delta === 0 || delta == null
@@ -131,6 +155,11 @@ function Comparison({ base, result }) {
                     : key === "yield"
                       ? `${delta > 0 ? "+" : ""}${number(delta * 100, 1)} pp`
                       : `${delta > 0 ? "+" : ""}${key === "profit" || key === "worstProfit" ? money(delta) : `${number(delta, 1)} acre-ft`}`}
+                  {delta != null && (
+                    <CalcInfo
+                      record={differenceRecord(rec(result, key), rec(base, key), `Difference, ${label.toLowerCase()}`)}
+                    />
+                  )}
                 </td>
               </tr>
             );
@@ -160,20 +189,17 @@ export default function Results({ farm, result, mock, onBack }) {
   const metrics = summaryMetrics(result);
   const { unit: yieldUnit } = useYieldUnit();
   const weights = weightByBlock(result);
-  const chartRows = result.years.map((y) => {
-    const total = result.farm_totals.find((r) => r.year === y) ?? {};
-    return {
-      year: y,
-      profit: total.profit,
-      ...Object.fromEntries(
-        result.blocks.map((b) => [
-          b.id,
-          b.yearly.find((r) => r.year === y)?.water_applied_af ?? null,
-        ]),
-      ),
-    };
+  // Water and profit charts: whole farm or one crop. The chart and its table share these rows.
+  const [moneyScope, setMoneyScope] = useState("farm");
+  const chartData = getChartRows(result, {
+    chart: chart === "water" ? "water" : "profit",
+    scope: moneyScope,
+    unit: yieldUnit,
   });
-  const flagged = result.summary.drought_years ?? [];
+  const scopeName =
+    moneyScope === "farm"
+      ? "Whole farm"
+      : blockLabel(result.blocks.find((b) => b.id === moneyScope), result.blocks);
   const overBudget = new Set(result.budget?.years_over_budget ?? []);
   const unit =
     chart === "water"
@@ -213,7 +239,7 @@ export default function Results({ farm, result, mock, onBack }) {
     setChange({ ...farm.blocks.find((b) => b.id === id) });
   }
   return (
-    <CalculationProvider result={result} farm={farm}>
+    <CalcRecords records={result.calculations}>
       <div className="results">
         <div className="results-toolbar">
           <button className="text-button" onClick={onBack}>
@@ -304,92 +330,76 @@ export default function Results({ farm, result, mock, onBack }) {
                 by this chart.
                 {mock ? " Demo dips are intentionally constructed." : ""}
               </p>
+              <div className="yield-chips" role="group" aria-label="Crop to show">
+                {[{ id: "farm" }, ...result.blocks].map((b) => (
+                  <button
+                    key={b.id}
+                    type="button"
+                    className="yield-chip"
+                    aria-pressed={moneyScope === b.id}
+                    onClick={() => setMoneyScope(b.id)}
+                  >
+                    {b.id === "farm" ? (
+                      "Whole farm"
+                    ) : (
+                      <>
+                        <span className="crop-dot" style={{ background: CROPS[b.crop]?.color ?? "#557f65" }} />
+                        {blockLabel(b, result.blocks)}
+                      </>
+                    )}
+                  </button>
+                ))}
+              </div>
               <div
                 className="chart-wrap"
                 role="img"
-                aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are available in the year table below.`}
+                aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are in the table below.`}
               >
                 <ResponsiveContainer width="100%" height="100%">
-                  {
-                    <BarChart
-                      data={chartRows}
-                      margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
-                    >
-                      <CartesianGrid
-                        strokeDasharray="3 4"
-                        vertical={false}
-                        stroke="#e5e9df"
-                      />
-                      <XAxis
-                        dataKey="year"
-                        tick={{ fontSize: 11 }}
-                        minTickGap={28}
-                      />
-                      <YAxis
-                        tickFormatter={(v) =>
-                          chart === "profit"
-                            ? `$${number(v / 1000)}k`
-                            : number(v)
-                        }
-                        tick={{ fontSize: 11 }}
-                        width={58}
-                      />
-                      {flagged.map((y) => (
-                        <ReferenceArea
-                          key={y}
-                          x1={y}
-                          x2={y + 1}
-                          fill="#d7be85"
-                          fillOpacity={0.16}
-                        />
+                  <BarChart data={chartData.rows} margin={{ top: 12, right: 15, left: 0, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#e5e9df" />
+                    <XAxis dataKey="year" tick={{ fontSize: 11 }} minTickGap={28} />
+                    <YAxis
+                      tickFormatter={(v) => (chart === "profit" ? `$${number(v / 1000)}k` : number(v))}
+                      tick={{ fontSize: 11 }}
+                      width={58}
+                    />
+                    {chartData.rows
+                      .filter((r) => r.drought)
+                      .map((r) => (
+                        <ReferenceArea key={r.year} x1={r.year} x2={r.year} fill="#d7be85" fillOpacity={0.22} ifOverflow="extendDomain" />
                       ))}
-                      <Tooltip
-                        formatter={(v, name) => [
-                          chart === "profit"
-                            ? money(v)
-                            : `${number(v, 1)} acre-ft`,
-                          name,
-                        ]}
-                        contentStyle={tooltipStyle}
-                      />
-                      <Legend
-                        iconType="circle"
-                        wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
-                      />
-                      {chart === "water" ? (
-                        result.blocks.map((b) => (
-                          <Bar
-                            key={b.id}
-                            dataKey={b.id}
-                            name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
-                            stackId="water"
-                            fill={CROPS[b.crop]?.color ?? "#557f65"}
-                            isAnimationActive={false}
-                          />
+                    <Tooltip
+                      formatter={(v, name, item) => [
+                        formatCell(item?.dataKey?.startsWith?.("water") ? "water" : "margin", v) +
+                          (chart === "water" ? " acre-ft" : ""),
+                        name,
+                      ]}
+                      contentStyle={tooltipStyle}
+                    />
+                    {chartData.series.length > 1 && (
+                      <Legend iconType="circle" wrapperStyle={{ fontSize: 12, paddingTop: 20 }} />
+                    )}
+                    {chart === "water"
+                      ? chartData.series.map((sr) => (
+                          <Bar key={sr.key} dataKey={sr.key} name={sr.label} stackId="water" fill={sr.color} isAnimationActive={false} />
                         ))
-                      ) : (
-                        <Bar
-                          dataKey="profit"
-                          name="Farm profit"
-                          radius={[3, 3, 0, 0]}
-                          isAnimationActive={false}
-                        >
-                          {chartRows.map((r) => (
-                            <Cell
-                              key={r.year}
-                              fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
-                              stroke={
-                                overBudget.has(r.year) ? "#d39a2c" : undefined
-                              }
-                              strokeWidth={overBudget.has(r.year) ? 3 : 0}
-                            />
-                          ))}
-                        </Bar>
-                      )}
-                    </BarChart>
-                  }
+                      : chartData.series.map((sr) => (
+                          <Bar key={sr.key} dataKey={sr.key} name={`${sr.label} margin`} radius={[3, 3, 0, 0]} isAnimationActive={false}>
+                            {chartData.rows.map((r) => (
+                              <Cell
+                                key={r.year}
+                                fill={r.margin >= 0 ? "#4e795d" : "#bb684f"}
+                                stroke={moneyScope === "farm" && overBudget.has(r.year) ? "#d39a2c" : undefined}
+                                strokeWidth={moneyScope === "farm" && overBudget.has(r.year) ? 3 : 0}
+                              />
+                            ))}
+                          </Bar>
+                        ))}
+                  </BarChart>
                 </ResponsiveContainer>
               </div>
+              <ChartDataTable data={chartData} title={chart === "water" && moneyScope === "farm" ? "Whole farm (bars stacked by crop)" : scopeName} />
             </>
           )}
           {chart === "profit" && (
@@ -478,77 +488,41 @@ export default function Results({ farm, result, mock, onBack }) {
                       </th>
                       <td>
                         {number(r?.crop_water_use_in, 1)}
-                        <MetricInfo
-                          metric="etc"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.crop_water_use_in`} />
                       </td>
                       <td>
                         {number(r?.effective_rain_in, 1)}
-                        <MetricInfo
-                          metric="rain"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.effective_rain_in`} />
                       </td>
                       <td>
                         {number(r?.water_applied_af, 1)}
-                        <MetricInfo
-                          metric="water"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.water_applied_af`} />
                       </td>
                       <td>
                         {formatWeight(w?.tons_per_acre, yieldUnit, true)}
-                        <MetricInfo
-                          metric="harvest"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.tons_per_acre`} display={formatWeight(w?.tons_per_acre, yieldUnit, true)} />
                         {pct && (
                           <small className="potential">
                             {pct} of potential
-                            <MetricInfo
-                              metric="relative"
-                              blockId={b.id}
-                              year={Number(year)}
-                            />
+                            <CalcInfo id={`block.${b.id}.${year}.relative_yield`} />
                           </small>
                         )}
                       </td>
                       <td>
                         {formatWeight(w?.tons, yieldUnit, false)}
-                        <MetricInfo
-                          metric="harvest"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.tons`} display={formatWeight(w?.tons, yieldUnit, false)} />
                       </td>
                       <td>
                         {number(r?.heat_stress_days)}
-                        <MetricInfo
-                          metric="heat"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.heat_stress_days`} />
                       </td>
                       <td>
                         {number(r?.gdd)}
-                        <MetricInfo
-                          metric="gdd"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.gdd`} />
                       </td>
                       <td>
                         {money(r?.profit)}
-                        <MetricInfo
-                          metric="profit"
-                          blockId={b.id}
-                          year={Number(year)}
-                        />
+                        <CalcInfo id={`block.${b.id}.${year}.profit`} />
                       </td>
                     </tr>
                   );
@@ -720,9 +694,6 @@ export default function Results({ farm, result, mock, onBack }) {
               </span>
               <h3>{scenarioTitle}</h3>
               <Comparison base={result} result={scenario} />
-              <CalculationProvider result={scenario} farm={scenarioInput}>
-                <MetricInfo metric="summary" label="this what-if scenario" />
-              </CalculationProvider>
               <details className="disclosure">
                 <summary>Changed-scenario assumptions</summary>
                 <ul className="assumptions">
@@ -766,7 +737,7 @@ export default function Results({ farm, result, mock, onBack }) {
           </details>
         </section>
       </div>
-    </CalculationProvider>
+    </CalcRecords>
   );
 }
 const tooltipStyle = {

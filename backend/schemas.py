@@ -280,6 +280,9 @@ class SimulateResponse(BaseModel):
     land: LandOut | None = None
     yield_weight: list[BlockYieldWeightOut] = Field(
         default_factory=list, description="Harvest weight per block and year (Part C)")
+    calculations: dict[str, dict] = Field(
+        default_factory=dict,
+        description="Calculation record per displayed number, keyed by id (backend/calculations.py)")
 
 
 # ---------------------------------------------------------------- location context
@@ -347,6 +350,8 @@ class CompareResultOut(BaseModel):
     summary_stats: SummaryStatsOut
     budget: BudgetOut
     rank: int = Field(description="1 is first by ranked_by; ties share a rank; missing values rank last")
+    calculations: dict[str, dict] = Field(
+        default_factory=dict, description="Calculation records keyed by id (backend/calculations.py)")
 
 
 class CompareResponse(BaseModel):
@@ -422,12 +427,16 @@ class OptimizePlanOut(BaseModel):
     summary_stats: SummaryStatsOut
     budget: BudgetOut
     land: LandOut
+    calculations: dict[str, dict] = Field(
+        default_factory=dict, description="Calculation records keyed by id (backend/calculations.py)")
 
 
 class OptimizeCurrentFarmOut(BaseModel):
     blocks: list[OptimizeBlockOut]
     summary_stats: SummaryStatsOut
     budget: BudgetOut
+    calculations: dict[str, dict] = Field(
+        default_factory=dict, description="Calculation records keyed by id (backend/calculations.py)")
 
 
 class OptimizeDifferenceOut(BaseModel):
@@ -443,6 +452,8 @@ class OptimizeAlternativeOut(BaseModel):
     blocks: list[OptimizeBlockOut]
     summary_stats: SummaryStatsOut
     budget: BudgetOut
+    calculations: dict[str, dict] = Field(
+        default_factory=dict, description="Calculation records keyed by id (backend/calculations.py)")
 
 
 class OptimizeResponse(BaseModel):
@@ -459,3 +470,5 @@ class OptimizeResponse(BaseModel):
         default=None, description="Why the engine check failed when status is 'error'")
     options_considered: int = Field(ge=0)
     assumptions: list[str]
+    calculations: dict[str, dict] = Field(
+        default_factory=dict, description="Plan minus current farm calculation records keyed by id (backend/calculations.py)")

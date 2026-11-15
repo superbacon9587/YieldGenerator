@@ -20,6 +20,7 @@ import math
 import requests
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from backend import geocode as geocode_mod
 from backend import power_client, regions
@@ -43,6 +44,8 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )
+# Calculation records make simulate responses large; compress them.
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 def _clean(values) -> list:

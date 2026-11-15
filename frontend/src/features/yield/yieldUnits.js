@@ -12,7 +12,8 @@ export const toUnit = (tons, unit) =>
 export const unitLabel = (unit, perAcre) =>
   `${unit === "lb" ? "lb" : "tons"}${perAcre ? "/acre" : ""}`;
 
-const digitsFor = (unit, perAcre) => (unit === "lb" ? 0 : perAcre ? 2 : 1);
+// Same precision as the data tables and calculation records (chartData.js decimals).
+const digitsFor = (unit, perAcre) => (unit === "lb" ? 0 : perAcre ? 3 : 2);
 
 /** Number only, for axis ticks and big summary numbers. */
 export function formatWeightNumber(tons, unit, perAcre = false) {

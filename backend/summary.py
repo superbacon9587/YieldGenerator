@@ -23,6 +23,7 @@ Every value that cannot be computed is None, never 0.
 from __future__ import annotations
 
 from backend import yield_weight
+from backend.rounding import exact_sum, mean, rnd
 from backend.schemas import (
     BudgetOut,
     LandOut,
@@ -37,11 +38,11 @@ ACRE_EPS = 1e-6
 
 
 def _mean(values: list[float]) -> float | None:
-    return sum(values) / len(values) if values else None
+    return mean(values)
 
 
 def _round(x: float | None, digits: int = 0) -> float | None:
-    return None if x is None else round(x, digits) + 0.0
+    return rnd(x, digits)
 
 
 # ---------------------------------------------------------------- summary stats
@@ -54,10 +55,15 @@ def summary_stats(response: SimulateResponse) -> tuple[SummaryStatsOut, list[str
     if profits and len(profits) < len(totals):
         notes.append(f"Profit totals and averages use the {len(profits)} of {len(totals)} "
                      "years that have price data.")
+    # Average margin is average sales minus average cost, each to $1, so the card
+    # reads Sales - Cost = Margin exactly, like the data table's Average row.
+    money_years = [t for t in totals if t.profit is not None]
+    avg_profit = (_round(_mean([t.revenue for t in money_years])) - _round(_mean([t.cost for t in money_years]))
+                  if money_years else None)
     stats = SummaryStatsOut(
         years_count=len(totals),
-        total_profit=_round(sum(profits)) if profits else None,
-        avg_profit=_round(_mean(profits)),
+        total_profit=_round(exact_sum(profits)) if profits else None,
+        avg_profit=avg_profit,
         avg_relative_yield=_round(_mean([t.relative_yield for t in totals]), 3),
         avg_water_applied_af=_round(_mean([t.water_applied_af for t in totals]), 1),
         avg_cost=_round(_mean(costs)),

@@ -15,6 +15,7 @@ import {
   setupCrops,
   setupFormFarm,
 } from "./savedSetups.js";
+import { CalcInfo, CalcRecords } from "../provenance/CalcPopover.jsx";
 import "./compare.css";
 
 const COLUMNS = [
@@ -23,6 +24,7 @@ const COLUMNS = [
   ["avg_relative_yield", "Average relative yield", percent, false],
   ["avg_water_applied_af", "Average water", (v) => (v == null ? "Not available" : `${number(v, 1)} acre-ft`), true],
 ];
+// Each ranking cell opens the setup's own calculation record (backend/calculations.py).
 
 const savedDate = (iso) => {
   const d = new Date(iso);
@@ -59,7 +61,8 @@ function RankingTable({ data }) {
         </thead>
         <tbody>
           {rows.map((r, i) => (
-            <tr key={r.name}>
+            <CalcRecords records={r.calculations} key={r.name}>
+            <tr>
               <td className="compare-rank">{r.rank}</td>
               <th>{r.name}</th>
               {COLUMNS.map(([key, , format]) => {
@@ -67,6 +70,7 @@ function RankingTable({ data }) {
                 return (
                   <td key={key} className={v != null && v === best[key] ? "compare-best" : ""}>
                     {format(v)}
+                    <CalcInfo id={`summary.${key}`} display={format(v)} label={`${r.name}, ${key}`} />
                   </td>
                 );
               })}
@@ -78,8 +82,10 @@ function RankingTable({ data }) {
                 {r.budget?.budget_usd == null
                   ? "No budget set"
                   : `${overCounts[i]} of ${r.summary_stats?.years_count ?? "?"}`}
+                <CalcInfo id="summary.years_over_budget" display={`${overCounts[i]} years`} />
               </td>
             </tr>
+            </CalcRecords>
           ))}
         </tbody>
       </table>

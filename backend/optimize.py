@@ -62,7 +62,7 @@ import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
 
-from backend import frost, reference, simulate as engine, units, yield_weight
+from backend import calculations, frost, reference, simulate as engine, units, yield_weight
 from backend.schemas import (
     PERENNIALS,
     BlockIn,
@@ -80,6 +80,7 @@ from backend.schemas import (
     SimulateRequest,
     SimulateResponse,
 )
+from backend.rounding import mean, rnd
 from backend.summary import MONTH_NAMES
 
 DAYS_PER_MONTH = 365.25 / 12
@@ -226,7 +227,7 @@ def evaluate_options(req: OptimizeRequest, keys: list[OptionKey], wx: pd.DataFra
                           blocks=blocks, optional=OptionalIn(soil=req.soil))
     bt = engine.run_backtest(sim, wx)
     bt.context = ctx
-    engine.apply_money(bt, ctx)
+    engine.apply_money(bt, ctx, rounded=False)
     money = {b.id: [(bt.seasons[b.id][y].revenue, bt.seasons[b.id][y].cost) for y in years]
              for b in blocks}
     if req.price_mode == "current":
@@ -234,7 +235,7 @@ def evaluate_options(req: OptimizeRequest, keys: list[OptionKey], wx: pd.DataFra
     else:  # production value always uses current prices
         bt_now = replace(bt, request=sim.model_copy(update={"price_mode": "current"}),
                          water_cost_per_af={}, money_notes=[])
-        engine.apply_money(bt_now, ctx)
+        engine.apply_money(bt_now, ctx, rounded=False)
         current = {b.id: [bt.seasons[b.id][y].revenue for y in years] for b in blocks}
 
     for key, b in zip(todo, blocks):
@@ -534,9 +535,14 @@ def blocks_out(blocks: list[BlockIn], resp: SimulateResponse) -> list[OptimizeBl
         w = weights.get(b.id)
         out.append(OptimizeBlockOut(
             **b.model_dump(include=set(BlockIn.model_fields)),
-            avg_profit=round(sum(profits) / len(profits)) if profits else None,
+            avg_profit=rnd(mean(profits)) if profits else None,
             avg_yield_tons=w.avg_tons if w else None))
     return out
+
+
+def part_records(blocks: list[BlockIn], resp: SimulateResponse, ctx: dict) -> dict:
+    """Calculation records for one plan card: whole-period numbers plus each block."""
+    return {**resp.calculations, **calculations.plan_block_records(blocks, resp, ctx)}
 
 
 def _close(engine_value: float | None, predicted: float, abs_tol: float) -> bool:
@@ -787,7 +793,8 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
     if req.current_farm is not None:
         resp = run_engine(req, req.current_farm.blocks, wx, ctx)
         current = OptimizeCurrentFarmOut(blocks=blocks_out(req.current_farm.blocks, resp),
-                                         summary_stats=resp.summary_stats, budget=resp.budget)
+                                         summary_stats=resp.summary_stats, budget=resp.budget,
+                                         calculations=part_records(req.current_farm.blocks, resp, ctx))
 
     problem = build_problem(req, wx, ctx)
 
@@ -820,7 +827,7 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
         return respond("error", error_detail=" ".join(issues))
 
     plan = OptimizePlanOut(blocks=blocks_out(blocks, resp), summary_stats=resp.summary_stats,
-                           budget=resp.budget, land=resp.land)
+                           budget=resp.budget, land=resp.land, calculations=part_records(blocks, resp, ctx))
     diff = None
     if current is not None:
         p, c = plan.summary_stats, current.summary_stats
@@ -829,10 +836,12 @@ def optimize(req: OptimizeRequest, wx=None, context: dict | None = None) -> Opti
             avg_yield_tons=_diff(p.avg_yield_tons, c.avg_yield_tons, 2),
             avg_water_applied_af=_diff(p.avg_water_applied_af, c.avg_water_applied_af, 1),
             avg_cost=_diff(p.avg_cost, c.avg_cost, 0))
+        diff_records = calculations.difference_records(p, c, plan.calculations, current.calculations)
 
     alternatives = build_alternatives(problem, sol, resp, wx, ctx)
     return respond(
         sol.status, plan=plan, difference_vs_current=diff, alternatives=alternatives,
+        calculations=diff_records if current is not None else {},
         binding_constraints=binding_sentences(problem, sol),
         assumptions=list(dict.fromkeys(optimizer_notes(problem) + resp.assumptions)))
 
@@ -872,5 +881,6 @@ def build_alternatives(problem: Problem, best: Solution, best_resp: SimulateResp
         seen.add(stats)
         out.append(OptimizeAlternativeOut(
             label=f"Alternative {len(out) + 1}", blocks=blocks_out(blocks, resp),
-            summary_stats=resp.summary_stats, budget=resp.budget))
+            summary_stats=resp.summary_stats, budget=resp.budget,
+            calculations=part_records(blocks, resp, ctx)))
     return out

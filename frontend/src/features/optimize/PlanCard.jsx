@@ -3,6 +3,7 @@ import { Bookmark, Check, Play } from "lucide-react";
 import { CROPS, IRRIGATION, MONTHS, activeMonth, money, number } from "../../domain.js";
 import { addSetup, loadSetups, persistSetups } from "../compare/savedSetups.js";
 import { monthsLabel, tonsByCrop } from "./optimizePlan.js";
+import { CalcInfo, CalcRecords } from "../provenance/CalcPopover.jsx";
 
 const tons = (v) => (v == null ? "No yield data" : `${number(v, v >= 100 ? 0 : 1)} tons`);
 const acreFeet = (v) => (v == null ? "Not available" : `${number(v, 1)} acre-ft`);
@@ -54,8 +55,14 @@ function BlockList({ blocks }) {
             </small>
           </div>
           <div className="opt-block-numbers">
-            <span>{b.avg_profit == null ? "No price data" : `${money(b.avg_profit)} / yr`}</span>
-            <small>{tons(b.avg_yield_tons)} / yr</small>
+            <span>
+              {b.avg_profit == null ? "No price data" : `${money(b.avg_profit)} / yr`}
+              <CalcInfo id={`block.${b.id}.avg_profit`} display={money(b.avg_profit)} />
+            </span>
+            <small>
+              {tons(b.avg_yield_tons)} / yr
+              <CalcInfo id={`block.${b.id}.avg_yield_tons`} display={tons(b.avg_yield_tons)} weightUnit="tons" />
+            </small>
           </div>
         </li>
       ))}
@@ -68,12 +75,18 @@ export function Stats({ stats, blocks, compact = false }) {
   return (
     <div className={`opt-stats ${compact ? "opt-compact" : ""}`}>
       <div>
-        <span>Average profit</span>
+        <span>
+          Average profit
+          <CalcInfo id="summary.avg_profit" display={money(stats?.avg_profit)} weightUnit="tons" />
+        </span>
         <strong>{money(stats?.avg_profit)}</strong>
         <small>per year</small>
       </div>
       <div>
-        <span>Average harvest</span>
+        <span>
+          Average harvest
+          <CalcInfo id="summary.avg_yield_tons" display={tons(stats?.avg_yield_tons)} weightUnit="tons" />
+        </span>
         <strong>{tons(stats?.avg_yield_tons)}</strong>
         <small>
           {perCrop.length
@@ -82,12 +95,18 @@ export function Stats({ stats, blocks, compact = false }) {
         </small>
       </div>
       <div>
-        <span>Average water</span>
+        <span>
+          Average water
+          <CalcInfo id="summary.avg_water_applied_af" display={acreFeet(stats?.avg_water_applied_af)} weightUnit="tons" />
+        </span>
         <strong>{acreFeet(stats?.avg_water_applied_af)}</strong>
         <small>applied per year</small>
       </div>
       <div>
-        <span>Average cost</span>
+        <span>
+          Average cost
+          <CalcInfo id="summary.avg_cost" display={money(stats?.avg_cost)} weightUnit="tons" />
+        </span>
         <strong>{money(stats?.avg_cost)}</strong>
         <small>per year</small>
       </div>
@@ -157,6 +176,7 @@ function SavePlan({ farm, stats, defaultName }) {
 /** One plan: calendar, blocks, numbers, and (for plans, not the current farm) actions. */
 export default function PlanCard({ title, eyebrow, part, farm, onBacktest, compact = false, tone = "" }) {
   return (
+    <CalcRecords records={part.calculations}>
     <article className={`opt-plan ${compact ? "opt-compact" : ""} ${tone}`}>
       <header>
         <span className="eyebrow">{eyebrow}</span>
@@ -181,5 +201,6 @@ export default function PlanCard({ title, eyebrow, part, farm, onBacktest, compa
         </div>
       )}
     </article>
+    </CalcRecords>
   );
 }

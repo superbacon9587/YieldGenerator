@@ -29,6 +29,7 @@ from collections.abc import Mapping, Sequence
 from statistics import median
 
 from backend import units
+from backend.rounding import mean, rnd
 from backend.schemas import BlockOut, BlockYieldWeightOut, YieldWeightYearOut
 
 ASSUMPTION = ("Harvest weight is the selected county or statewide median yield scaled by how each year's relative "
@@ -100,12 +101,11 @@ def tons_per_acre_by_year(crop: str, location, relative_yields):
 # ---------------------------------------------------------------- response
 
 def _round(x: float | None, digits: int) -> float | None:
-    return None if x is None else round(x, digits)
+    return rnd(x, digits)
 
 
 def _mean(values: Sequence[float | None]) -> float | None:
-    present = [v for v in values if v is not None]
-    return sum(present) / len(present) if present else None
+    return mean(values)
 
 
 def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
@@ -136,6 +136,7 @@ def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
         )
         for r, t in zip(block.yearly, tpa)
     ]
+    # Averages are of the displayed (rounded) yearly values, so they can be redone by hand.
     return BlockYieldWeightOut(
         block_id=block.id,
         crop=block.crop,
@@ -143,8 +144,8 @@ def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
         source_unit=source_unit,
         conversion=conversion,
         yearly=yearly,
-        avg_tons=_round(_mean([None if t is None else t * block.acres for t in tpa]), 2),
-        avg_tons_per_acre=_round(_mean(tpa), 3),
+        avg_tons=_round(_mean([y.tons for y in yearly]), 2),
+        avg_tons_per_acre=_round(_mean([y.tons_per_acre for y in yearly]), 3),
     )
 
 
@@ -164,7 +165,7 @@ def avg_yield_tons(yield_weight: Sequence[BlockYieldWeightOut]) -> float | None:
         for row in bw.yearly:
             if row.tons is not None:
                 totals[row.year] = totals.get(row.year, 0.0) + row.tons
-    return _round(_mean(list(totals.values())), 2)
+    return _round(_mean([rnd(v, 2) for v in totals.values()]), 2)  # yearly totals to 0.01 ton
 
 
 def assumptions(yield_weight: Sequence[BlockYieldWeightOut], notes: Mapping) -> list[str]:
