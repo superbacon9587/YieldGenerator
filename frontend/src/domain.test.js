@@ -11,6 +11,8 @@ import {
   summaryMetrics,
   scenarioFarm,
   money,
+  irrigationsFor,
+  irrigationIssue,
 } from "./domain.js";
 import { generateMock } from "./mock/generate.js";
 
@@ -83,12 +85,31 @@ test("water-cut scenario uses baseline mean, preserves baseline and changes mock
     summaryMetrics(generateMock(changed)).yield < summaryMetrics(base).yield,
   );
 });
-test("drip scenario changes methods but not crop area or baseline", () => {
+test("drip scenario switches only entries with drip cost data, not crop area or baseline", () => {
   const farm = clone(DEFAULT_FARM);
   const next = scenarioFarm(farm, { type: "drip" }, generateMock(farm));
-  assert.ok(next.blocks.every((b) => b.irrigation === "drip"));
+  for (const b of next.blocks)
+    assert.equal(b.irrigation, irrigationsFor(b.crop).includes("drip") ? "drip" : farm.blocks.find((x) => x.id === b.id).irrigation);
+  assert.equal(next.blocks[0].irrigation, "drip"); // almonds have drip cost data
+  assert.equal(next.blocks[2].irrigation, "flood"); // corn: flood only
   assert.equal(farm.blocks[2].irrigation, "flood");
   assert.equal(next.blocks[2].acres, farm.blocks[2].acres);
+  assert.deepEqual(validateFarm(next), []);
+});
+test("only irrigation types with cost data are offered, with a clear message otherwise", () => {
+  assert.deepEqual(irrigationsFor("processing_tomatoes"), ["drip"]);
+  assert.deepEqual(irrigationsFor("oats"), ["flood"]);
+  assert.deepEqual(irrigationsFor("corn", { irrigation_by_crop: { corn: ["drip", "flood"] } }), ["drip", "flood"]);
+  assert.equal(irrigationIssue({ crop: "almonds", irrigation: "drip" }), null);
+  const msg = irrigationIssue({ crop: "processing_tomatoes", irrigation: "micro_sprinkler" });
+  assert.match(msg, /^No cost data for micro-sprinkler irrigation on processing tomatoes/);
+  assert.match(msg, /Choose drip\.$/);
+  // An old saved setup with an unpriced combination is stopped with that message, not a $0 cost.
+  const old = clone(DEFAULT_FARM);
+  old.blocks[1].irrigation = "sprinkler"; // oats on sprinkler
+  const errors = validateFarm(old);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], /^Crop 2: No cost data for sprinkler irrigation on oats/);
 });
 test("mock response follows contract with dynamic years and blocks", () => {
   const farm = clone(DEFAULT_FARM);
@@ -123,4 +144,14 @@ test("perennial crop swaps update season without mutating baseline", () => {
   assert.equal(next.blocks[1].start_month, 1);
   assert.equal(next.blocks[1].end_month, 12);
   assert.equal(farm.blocks[1].start_month, 11);
+});
+test("water source buttons set the surface share: surface 1, well 0, mix keeps or starts 50/50", async () => {
+  const { waterSourceKind, waterSourceShare } = await import("./domain.js");
+  assert.equal(waterSourceKind(1), "surface");
+  assert.equal(waterSourceKind(0), "well");
+  assert.equal(waterSourceKind(0.35), "mix");
+  assert.equal(waterSourceShare("surface", 0.3), 1);
+  assert.equal(waterSourceShare("well", 0.3), 0);
+  assert.equal(waterSourceShare("mix", 0.3), 0.3);
+  assert.equal(waterSourceShare("mix", 1), 0.5);
 });

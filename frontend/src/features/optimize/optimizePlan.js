@@ -97,6 +97,7 @@ export function buildRequest(farm) {
     max_share_per_crop: Number(s.max_share_per_crop),
     min_block_acres: Number(s.min_block_acres),
     soil: base.optional.soil,
+    surface_water_share: Number(base.optional.surface_water_share ?? 0.5),
     current_farm: { blocks: base.blocks },
   };
 }

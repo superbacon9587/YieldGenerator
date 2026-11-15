@@ -1,12 +1,19 @@
 // Pure helpers for Part A: land check, period presets, summary numbers, budget.
 // Every helper tolerates an older backend that does not send the new fields.
-import { MONTHS, activeMonth, mean, presetYears as domainPresetYears } from "../../domain.js";
+import {
+  IRRIGATION_BY_CROP,
+  MONTHS,
+  activeMonth,
+  mean,
+  presetYears as domainPresetYears,
+} from "../../domain.js";
 
 export const DEFAULT_PERIOD = "20";
 export const FALLBACK_META = Object.freeze({
   first_year: 1985,
   last_full_year: new Date().getFullYear() - 1,
   presets: [5, 10, 20, 30, 40],
+  irrigation_by_crop: IRRIGATION_BY_CROP,
 });
 
 /** Acres in the ground for each month, January first. Nov to Apr wraps. */

@@ -76,12 +76,13 @@ def test_backtest_notes_frost_as_a_neutral_fact():
 
 def tomato_context():
     ctx = make_context()
-    ctx["baseline_yields"]["processing_tomatoes"] = {"value": 50.0, "unit": "TONS / ACRE",
-                                                     "basis": "county", "source": "test"}
-    ctx["production_costs"]["processing_tomatoes"] = {"cost_excl_water": 2700.0, "unit": "$ / ACRE",
-                                                      "region": "test", "source": "test"}
-    ctx["production_costs"]["oats"] = {"cost_excl_water": 250.0, "unit": "$ / ACRE",
-                                       "region": "test", "source": "test"}
+    # UC Davis processing tomato study, San Joaquin Valley South 2018: 58 tons/acre, $2,710/acre.
+    # Oats are costed from USDA ERS (cost_components.csv), so no oats cost is injected.
+    ctx["baseline_yields"]["processing_tomatoes"] = {"value": 58.0, "unit": "TONS / ACRE", "basis": "county",
+                                                     "source": "UC Davis SJV South 2018 study yield"}
+    ctx["production_costs"]["processing_tomatoes"] = {"cost_excl_water": 2710.0, "unit": "$ / ACRE",
+                                                      "region": "San Joaquin Valley South",
+                                                      "source": "tomatoes_processing_sjv_south_2018.pdf p. 14"}
     return ctx
 
 
@@ -109,10 +110,11 @@ def test_february_tomatoes_excluded_and_winter_oats_kept(monkeypatch):
     assert {("processing_tomatoes", m) for m in (3, 4, 5)} <= starts
     assert problem.frost[("processing_tomatoes", 2)].share == 1.0
     oats_dec = [o for o in problem.options if o.key.crop == "oats" and o.key.start_month == 12]
-    assert len(oats_dec) == 4 and all(o.frost_risk_share > 0.2 for o in oats_dec)  # tolerant: kept
-    assert problem.frost_excluded == 4  # one window x 4 irrigation types
+    # Oats have cost data for flood only; tomatoes for drip only.
+    assert len(oats_dec) == 1 and all(o.frost_risk_share > 0.2 for o in oats_dec)  # tolerant: kept
+    assert problem.frost_excluded == 1  # one window x the 1 priced irrigation type
     note = next(e for e in problem.excluded if "frost occurred" in e)
-    assert note.startswith("4 options were left out because frost occurred within 45 days")
+    assert note.startswith("1 option was left out because frost occurred within 45 days")
     assert "processing tomato planted in Feb (4 of 4 years)" in note
     assert "oat" not in note
     for o in problem.options:

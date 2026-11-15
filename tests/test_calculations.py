@@ -25,7 +25,10 @@ def test_harvest_sales_cost_and_margin_share_the_same_quantity(mode):
             assert r["cost_unrounded"] == pytest.approx(r["production_cost_excl_water"]+r["water_cost"])
             assert r["revenue_unrounded"]-r["cost_unrounded"] == pytest.approx(r["profit_unrounded"])
             assert abs(r["displayed"]["revenue"]-r["revenue_unrounded"]) <= .5
-            assert r["production_cost_excl_water"] == 3000*40
+            cb = r["cost_breakdown"]
+            assert r["production_cost_excl_water"] == pytest.approx(cb["inputs"] + cb["harvest"] + cb["irrigation_system"])
+            assert cb["inputs"] == pytest.approx(cb["inputs_per_acre"] * block["acres"], abs=0.01)
+            assert r["year_used"] == (2025 if mode == "current" else r["year"])
     rec = details["reconciliation"]
     assert rec["avg_revenue"]-rec["avg_cost"] == pytest.approx(rec["avg_profit"], abs=1)
     assert rec["avg_profit"] == pytest.approx(mean(r.profit for r in out.farm_totals))
@@ -57,10 +60,15 @@ def test_temperature_water_and_rain_arithmetic_is_traceable():
             water = 1-r["ky"]*(1-r["eta_active_mm"]/r["etc_active_mm"]) if r["etc_active_mm"] else 1
             assert round(min(max(water-r["heat_penalty_fraction"],0),1),3) == r["displayed"]["relative_yield"]
 
-def test_conflicting_cost_source_year_is_flagged_not_claimed_verified():
+def test_cost_source_year_matches_study_file():
     from backend import regions
     ctx = regions.build_context({"state":"CA", "county":"Merced", "in_california":True})
     out = engine.simulate(request(), wx=make_weather(), context=ctx)
     almond = out.calculation_details["blocks"][0]["yearly"][0]
-    assert any("2024" in w and "2022" in w for w in almond["source_warnings"])
-    assert almond["production_cost_source"]["region"] == "Sacramento Valley"
+    assert not any("file" in w for w in almond["source_warnings"])
+    assert almond["cost_study"]["region"] == "Sacramento Valley" and almond["cost_study"]["base_year"] == 2024
+    assert almond["cost_study"]["source_url"].startswith("https://coststudyfiles.ucdavis.edu/")
+    # No source points at the old single flat cost row (production_costs.csv).
+    block = out.calculation_details["blocks"][0]
+    assert not any("production_cost_source" in y or "production_cost_per_acre" in y for y in block["yearly"])
+    assert not any("production cost" in s["label"].lower() for s in block["sources"])

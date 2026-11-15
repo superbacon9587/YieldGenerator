@@ -175,11 +175,17 @@ def test_sources_name_the_real_data_used():
     assert base["source"].startswith("USDA NASS Quick Stats, Merced County corn grain yield, ")
     assert re.search(r"\d{4} to \d{4} median \(\d+ years\)", base["source"])
     assert base["links"][0]["url"] == "https://quickstats.nass.usda.gov"
-    cost = profit["Production cost excluding water"]
-    assert re.match(r"UC Davis Cost and Return Study, Corn, .+, \d{4}, p\. \d+\.", cost["source"])
+    cost = next(i for n, i in profit.items() if n.startswith("Machinery and fuel per acre, UC Davis"))
+    assert re.match(r"UC Davis Cost and Return Study, Corn, .+, \d{4}, p\. \d+: machinery fuel\.", cost["source"])
+    assert cost["source_url"].startswith("https://coststudyfiles.ucdavis.edu/")
+    diesel = next(i for n, i in profit.items() if n.startswith("EIA diesel price, "))
+    assert diesel["source_url"].startswith("https://www.eia.gov/dnav/pet/")
+    fert = next(i for n, i in profit.items() if n.startswith("NASS fertilizer index, "))
+    assert fert["source"].startswith("USDA NASS Prices Paid Index (2011=100)")
+    assert fert["source_url"] == "https://quickstats.nass.usda.gov"
     elec = next(i for n, i in profit.items() if n.startswith("Electricity price"))
-    assert elec["source"].startswith("U.S. EIA, California average commercial electricity price, ")
-    assert elec["source_url"] == "https://www.eia.gov/electricity/data/browser"
+    assert elec["source"].startswith("U.S. EIA, California commercial electricity price, ")
+    assert elec["source_url"].startswith("https://www.eia.gov/opendata/browser/")
     water = profit["Surface water price"]
     assert water["source"].startswith("Merced Irrigation District 2024 rate")
     lift = profit["Well lift"]
@@ -198,7 +204,8 @@ def test_unverified_sources_are_flagged_not_guessed():
     req, ctx = CASES["merced_reference"]
     c = engine.simulate(req, wx=WX, context=ctx).calculations
     profit = {i["name"]: i for i in c["block.a.2003.profit"]["inputs"]}
-    assert not profit["Production cost excluding water"]["source_verified"]  # 2024 study cited from a 2022 file
+    study = [i for n, i in profit.items() if ", UC Davis " in n and " study" in n]
+    assert study and all(i["source_verified"] for i in study)  # study file, page and URL known
     assert not profit["Pump efficiency"]["source_verified"]  # defaults.json has no source for it
     eff = next(i for i in c["block.a.2003.water_applied_af"]["inputs"] if i["name"].startswith("Irrigation efficiency"))
     assert not eff["source_verified"] and "to be checked" in eff["source"]
@@ -216,11 +223,19 @@ def test_reported_and_estimated_inputs_are_tagged():
     profit = out.calculations["block.a.2003.profit"]
     by_name = {i["name"]: i for i in profit["inputs"]}
     assert by_name["Almonds area"]["kind"] == "farmer" and not by_name["Almonds area"]["is_estimate"]
-    assert by_name["Well lift"]["estimate_reason"] == "Default assumption, 150 ft well lift"
+    assert by_name["Well lift"]["is_estimate"] and by_name["Well lift"]["estimate_reason"] == "Team assumption"
     assert by_name["Surface water share"]["is_estimate"]  # not entered, schema default
-    cost = by_name["Production cost excluding water"]
+    cost = next(i for n, i in by_name.items() if n.startswith("Labor per acre, UC Davis"))
     assert cost["is_estimate"] and "UC Davis Cost and Return Study" in cost["source"]
-    assert "file name" in cost["estimate_reason"]  # 2024 study cited from a 2022 file
+    assert "file name" not in cost["estimate_reason"]
+    assert cost["estimate_reason"].startswith(
+        "Typical practice amounts from the UC Davis cost study, not this farm's actual records")
+    # Almonds SV study has micro-sprinklers only: the drip system comes from the SJV South study.
+    borrowed = next(i for n, i in by_name.items()
+                    if n.endswith(": installed cost per acre, UC Davis San Joaquin Valley South 2024 study"))
+    assert borrowed["value"] == 1800 and "prices no drip system" in borrowed["estimate_reason"]
+    life = next(i for n, i in by_name.items() if n.endswith(": system life, UC Davis San Joaquin Valley South 2024 study"))
+    assert life["value"] == 23 and life["unit"] == "years"
     price = next(i for i in profit["inputs"] if i["name"].startswith("Almonds price"))
     assert price["kind"] == "nass" and "USDA NASS Quick Stats" in price["source"]
     water = out.calculations["block.a.2003.crop_water_use_in"]
@@ -295,3 +310,86 @@ def test_steps_show_both_the_exact_and_the_rounded_result():
     assert rec.steps[0]["text"] == "1 / 3 = 0.333333"
     assert rec.steps[1]["text"] == "0.333333 x 3 = 0.999999, rounded to 1.00"
     hand_check("x", rec.out(1.0))
+
+
+# ---------------------------------------------------------------- cost records (inputs + harvest + water + system)
+
+UCD_REASON = "Typical practice amounts from the UC Davis cost study, not this farm's actual records"
+INPUT_KEYS = {"name", "value", "unit", "source", "source_url", "is_estimate", "estimate_reason"}
+CODE_URL = re.compile(r"github\.com|gitlab\.com|\.(py|js|jsx|ts)(\?|#|$)|\b[0-9a-f]{40}\b")
+
+
+def test_cost_record_shows_the_four_parts_with_numbers():
+    req, ctx = CASES["merced_reference"]
+    out = engine.simulate(req, wx=WX, context=ctx)
+    found = 0
+    for b in out.blocks:
+        for y in b.yearly:
+            if y.cost is None:
+                assert f"block.{b.id}.{y.year}.cost" not in out.calculations
+                continue
+            rec = out.calculations[f"block.{b.id}.{y.year}.cost"]
+            found += 1
+            assert rec["value"] == y.cost and rec["formula_text"] == "Cost = inputs + harvest + water + irrigation system"
+            assert [p["name"] for p in rec["parts"]] == ["Inputs", "Harvest", "Water", "Irrigation system"]
+            assert round(sum(p["value"] for p in rec["parts"])) == rec["value"]
+            texts = [s["text"] for s in rec["steps"]]
+            for label in ("Inputs cost: ", "Harvest cost: ", "Water cost (", "Irrigation system cost"):
+                assert any(t.startswith(label) for t in texts), (rec["id"], label)
+            assert texts[-1].startswith("Cost: inputs $") and " + harvest $" in texts[-1] \
+                and " + water $" in texts[-1] and " + irrigation system $" in texts[-1]
+            hand_check(rec["id"], rec)
+            # The margin box shows the same four parts and the same cost.
+            margin = out.calculations[f"block.{b.id}.{y.year}.profit"]
+            assert margin["parts"] == rec["parts"]
+    assert found
+
+
+def test_cost_record_inputs_name_their_sources():
+    req, ctx = CASES["merced_reference"]
+    out = engine.simulate(req, wx=WX, context=ctx)
+    rec = out.calculations["block.a.2003.cost"]  # almonds, drip, Merced
+    for i in rec["inputs"]:
+        assert INPUT_KEYS <= set(i), i["name"]
+    by = {i["name"]: i for i in rec["inputs"]}
+    components = [i for n, i in by.items() if ", UC Davis " in n and " study" in n]
+    assert components
+    for i in components:
+        assert i["source"].startswith("UC Davis Cost and Return Study, Almonds, ")
+        assert i["source_url"].startswith("https://coststudyfiles.ucdavis.edu/")
+        assert i["is_estimate"] and i["estimate_reason"].startswith(UCD_REASON)
+    nass = [i for n, i in by.items() if n.startswith("NASS ")]
+    assert nass and all(i["source"].startswith("USDA NASS Prices Paid Index (2011=100)")
+                        and i["source_url"] == "https://quickstats.nass.usda.gov" for i in nass)
+    diesel = next(i for n, i in by.items() if n.startswith("EIA diesel price, "))
+    elec = next(i for n, i in by.items() if n.startswith("Electricity price, "))
+    assert diesel["source"].startswith("U.S. EIA") and diesel["source_url"].startswith(
+        "https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=EMD_EPD2D_PTE_NUS_DPG")
+    assert elec["source"].startswith("U.S. EIA") and elec["source_url"].startswith("https://www.eia.gov/")
+    for name in ("Water applied (to 0.0001 acre-ft)", "Almonds harvest this season"):
+        assert by[name]["source"] == "YieldGenerator simulation using NASA POWER weather"
+        assert by[name]["source_url"] == "https://power.larc.nasa.gov"
+    assert "Merced Irrigation District" in by["Surface water price"]["source"]
+    assert by["Surface water price"]["source_url"] == "https://www.mercedid.org"
+    assert by["Well lift"]["is_estimate"] and by["Well lift"]["estimate_reason"] == "Team assumption"
+
+
+def test_no_source_url_points_to_code_or_a_commit():
+    req, ctx = CASES["merced_reference"]
+    out = engine.simulate(req, wx=WX, context=ctx)
+    urls = []
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                if k in ("source_url", "url") and isinstance(v, str):
+                    urls.append(v)
+                walk(v)
+        elif isinstance(x, list):
+            for v in x:
+                walk(v)
+    walk(out.calculations)
+    walk(out.calculation_details)
+    assert urls
+    bad = sorted({u for u in urls if CODE_URL.search(u) or not u.startswith("https://")})
+    assert not bad, bad

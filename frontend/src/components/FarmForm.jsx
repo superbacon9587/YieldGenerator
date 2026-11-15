@@ -9,23 +9,37 @@ import {
   Search,
   LoaderCircle,
 } from "lucide-react";
-import { CROPS, IRRIGATION, MONTHS, number, toAcres } from "../domain.js";
+import {
+  CROPS,
+  IRRIGATION,
+  MONTHS,
+  irrigationIssue,
+  irrigationsFor,
+  waterSourceKind,
+  waterSourceShare,
+  number,
+  toAcres,
+} from "../domain.js";
 import { geocode } from "../api.js";
 import Timeline from "./Timeline.jsx";
 import LandBudgetPanel from "../features/summary/LandBudgetPanel.jsx";
 import LandCheck from "../features/summary/LandCheck.jsx";
 import PeriodPresets from "../features/summary/PeriodPresets.jsx";
 
-function BlockEditor({ block, index, onChange, onRemove }) {
+function BlockEditor({ block, index, onChange, onRemove, meta }) {
   const [unit, setUnit] = useState("acres");
   const area = unit === "sqft" ? Number(block.acres) * 43560 : block.acres;
   function update(key, value) {
     onChange({ ...block, [key]: value });
   }
+  const priced = irrigationsFor(block.crop, meta);
+  const issue = irrigationIssue(block, meta);
   function selectCrop(crop) {
+    const ok = irrigationsFor(crop, meta);
     onChange({
       ...block,
       crop,
+      irrigation: ok.includes(block.irrigation) ? block.irrigation : (ok[0] ?? block.irrigation),
       ...(CROPS[crop].perennial
         ? { start_month: 1, end_month: 12 }
         : {
@@ -89,9 +103,14 @@ function BlockEditor({ block, index, onChange, onRemove }) {
           value={block.irrigation}
           onChange={(e) => update("irrigation", e.target.value)}
         >
-          {Object.entries(IRRIGATION).map(([key, name]) => (
+          {issue && (
+            <option value={block.irrigation} disabled>
+              {IRRIGATION[block.irrigation]} (no cost data)
+            </option>
+          )}
+          {priced.map((key) => (
             <option key={key} value={key}>
-              {name}
+              {IRRIGATION[key]}
             </option>
           ))}
         </select>
@@ -132,9 +151,65 @@ function BlockEditor({ block, index, onChange, onRemove }) {
       >
         <Trash2 size={17} />
       </button>
+      {issue && (
+        <p className="irrigation-issue" role="alert">
+          {issue}
+        </p>
+      )}
     </div>
   );
 }
+/**
+ * Where applied water comes from. Each acre-ft is charged once: the surface share at the
+ * district price, the rest at the well pumping cost (optional.surface_water_share).
+ */
+function WaterSource({ share, onChange }) {
+  const kind = waterSourceKind(share);
+  const wells = Math.round((1 - share) * 100);
+  return (
+    <fieldset className="water-source">
+      <legend>Water source</legend>
+      <div className="segmented">
+        {[
+          ["surface", "Surface water"],
+          ["well", "Well"],
+          ["mix", "Mix"],
+        ].map(([key, name]) => (
+          <button
+            key={key}
+            type="button"
+            aria-pressed={kind === key}
+            onClick={() => onChange(waterSourceShare(key, share))}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+      {kind === "mix" && (
+        <label>
+          From wells: {wells}% · surface water: {100 - wells}%
+          <input
+            type="range"
+            aria-label="Share of water from wells"
+            min="5"
+            max="95"
+            step="5"
+            value={wells}
+            onChange={(e) => onChange(1 - Number(e.target.value) / 100)}
+          />
+        </label>
+      )}
+      <p className="caption">
+        {kind === "surface"
+          ? "All applied water is bought from the irrigation district."
+          : kind === "well"
+            ? "All applied water is pumped from wells (lift, pump efficiency, and EIA electricity)."
+            : "Each acre-foot comes from one source: the well share is pumped, the rest is bought."}
+      </p>
+    </fieldset>
+  );
+}
+
 export default function FarmForm({
   farm,
   setFarm,
@@ -326,6 +401,7 @@ export default function FarmForm({
                 key={block.id}
                 block={block}
                 index={index}
+                meta={meta}
                 onChange={(changed) =>
                   setFarm({
                     ...farm,
@@ -494,22 +570,10 @@ export default function FarmForm({
                   />
                 </label>
               </div>
-              <label>
-                Surface water:{" "}
-                {number(Number(farm.optional.surface_water_share) * 100)}% ·
-                Wells:{" "}
-                {number((1 - Number(farm.optional.surface_water_share)) * 100)}%
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={farm.optional.surface_water_share}
-                  onChange={(e) =>
-                    optional("surface_water_share", Number(e.target.value))
-                  }
-                />
-              </label>
+              <WaterSource
+                share={Number(farm.optional.surface_water_share)}
+                onChange={(v) => optional("surface_water_share", v)}
+              />
             </div>
           </details>
         </section>

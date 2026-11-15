@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
+  COST_PART_NAMES,
+  costParts,
   differenceRecord,
   formatRecordValue,
   inWeightUnit,
@@ -107,4 +109,49 @@ test("source cell parts: From line, unverified flag, no code links", () => {
 test("no record text uses em dashes", () => {
   const text = JSON.stringify([inWeightUnit(harvest, "lb"), differenceRecord(harvest, harvest, "x")]);
   assert.equal(/[–—]/.test(text), false);
+});
+
+
+const SAMPLE = JSON.parse(
+  readFileSync(new URL("./sample_response.json", import.meta.url), "utf8"),
+);
+
+test("cost info boxes list inputs, harvest, water and irrigation system that add up to the cost", () => {
+  const records = Object.values(SAMPLE.calculations);
+  const blockCosts = records.filter((r) => /^block\..+\.\d{4}\.cost$/.test(r.id));
+  assert.ok(blockCosts.length > 0);
+  for (const r of blockCosts) {
+    const parts = costParts(r);
+    assert.deepEqual(parts.rows.map((p) => p.name), COST_PART_NAMES, r.id);
+    assert.equal(Math.round(parts.sum), r.value, r.id);
+    assert.equal(parts.sumText, formatRecordValue(r), r.id);
+    for (const label of ["Inputs cost:", "Harvest cost:", "Water cost (", "Irrigation system cost"])
+      assert.ok(r.steps.some((s) => s.text.startsWith(label)), `${r.id} ${label}`);
+  }
+  // Table averages and the margin box carry the same four parts.
+  const farmCost = SAMPLE.calculations["table.farm.total.cost"];
+  assert.deepEqual(costParts(farmCost).rows.map((p) => p.name), COST_PART_NAMES);
+  assert.ok(Math.abs(costParts(farmCost).sum - farmCost.value) <= 2);
+  const margin = SAMPLE.calculations[blockCosts[0].id.replace(/\.cost$/, ".profit")];
+  assert.deepEqual(margin.parts, blockCosts[0].parts);
+  assert.equal(costParts({ parts: [] }), null);
+  assert.equal(costParts(harvest), null);
+});
+
+test("no source link in the sample points to code or a commit", () => {
+  const urls = [];
+  const walk = (x) => {
+    if (Array.isArray(x)) x.forEach(walk);
+    else if (x && typeof x === "object")
+      for (const [k, v] of Object.entries(x)) {
+        if ((k === "source_url" || k === "url") && typeof v === "string") urls.push(v);
+        walk(v);
+      }
+  };
+  walk(SAMPLE.calculations);
+  assert.ok(urls.length > 0);
+  for (const u of urls) {
+    assert.ok(u.startsWith("https://"), u);
+    assert.doesNotMatch(u, /github\.com|\.(py|js|jsx)(\?|#|$)|\b[0-9a-f]{40}\b/, u);
+  }
 });

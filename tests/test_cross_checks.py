@@ -141,3 +141,15 @@ def test_sample_file_is_current():
     fresh, saved = json.loads(mod.sample().model_dump_json()), json.loads(SAMPLE.read_text())
     for key in ("farm_totals", "blocks", "yield_weight", "summary_stats", "summary", "years"):
         assert fresh[key] == saved[key], key
+
+
+def test_frontend_irrigation_map_matches_backend():
+    """The form's fallback list of irrigation types with cost data (frontend/src/domain.js)
+    is the same as the backend's (GET /api/meta irrigation_by_crop)."""
+    import re
+    from backend import simulate as sim
+    text = (Path(__file__).resolve().parents[1] / "frontend/src/domain.js").read_text()
+    body = re.search(r"export const IRRIGATION_BY_CROP = \{(.*?)\};", text, re.S).group(1)
+    frontend = {crop: re.findall(r'"(\w+)"', values)
+                for crop, values in re.findall(r"(\w+): \[([^\]]*)\]", body)}
+    assert frontend == sim.irrigation_by_crop()

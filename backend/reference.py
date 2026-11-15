@@ -94,6 +94,12 @@ def irrigation_efficiency(system: str) -> float:
         raise KeyError(f"Unknown irrigation system {system!r}. Known: {sorted(irrigation())}") from None
 
 
+def soil_water_fractions(texture: str) -> dict[str, float]:
+    """theta_fc, theta_wp and porosity (m3/m3) for a soil texture (soils.json)."""
+    entry = soils()[texture]
+    return {k: float(entry[k]["value"]) for k in ("theta_fc", "theta_wp", "porosity")}
+
+
 def soil_awc_mm_per_m(texture: str) -> float:
     try:
         return soils()[texture]["awc_mm_per_m"]

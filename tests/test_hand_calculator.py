@@ -70,14 +70,19 @@ def test_required_breakdowns_are_spelled_out(merced):
     c = merced.calculations
     margin = c["block.b1.2010.profit"]
     names = " | ".join(i["name"] for i in margin["inputs"])
-    for needed in ("Pounds per ton", "price, ", "Production cost excluding water", "Water applied", "Surface water share",
-                   "Surface water price", "Groundwater share", "Well lift", "Energy to lift 1 acre-ft by 1 ft",
-                   "Pump efficiency", "Electricity price", "Cents per dollar", "Almonds area"):
+    for needed in ("Pounds per ton", "price, ", "Fertilizer per acre, UC Davis", "Labor per acre, UC Davis",
+                   "Harvest and haul per ton, UC Davis", "NASS fertilizer index, ", "EIA diesel price, ",
+                   "Water applied", "Surface water share", "Surface water price", "Groundwater share", "Well lift",
+                   "Energy to lift 1 acre-ft by 1 ft", "Pump efficiency", "Electricity price", "Almonds area"):
         assert needed in names, needed
-    steps = [s["text"] for s in margin["steps"]]
-    assert [t.split(":")[0] for t in steps] == [
-        "Harvest", "Sales", "Production", "Surface water", "Surface water cost", "Groundwater",
-        "Electricity", "Groundwater cost", "Cost", "Margin"]
+    steps = [s["text"].split(":")[0] for s in margin["steps"]]
+    assert steps[:2] == ["Harvest", "Sales"]
+    assert any(t.startswith("NASS fertilizer index ratio") for t in steps)
+    order = ["Inputs per acre (each study cost x its index ratio)", "Inputs cost", "Harvest cost",
+             "Irrigation system cost (drip, installed cost / life)", "Surface water", "Surface water cost",
+             "Groundwater", "Groundwater pumping cost", "Water cost (40% surface water, 60% wells)", "Cost", "Margin"]
+    assert [t for t in steps if t in order] == order
+    assert steps[-2:] == ["Cost", "Margin"]
     corn = c["block.b3.2010.profit"]
     assert any(i["name"] == "Corn bushel weight" and i["value"] == 56 for i in corn["inputs"])
     assert "lb/bu" in corn["steps"][1]["text"]
@@ -89,3 +94,42 @@ def test_required_breakdowns_are_spelled_out(merced):
     assert avg["steps"][-1]["text"].endswith("acre-ft") and "/ 25 years" in avg["steps"][-1]["text"]
     lb = c["summary.avg_yield_tons"]["lb"]
     assert any(i["value"] == 2000 for i in lb["inputs"]) and lb["unit"] == "lb"
+
+
+# ---------------------------------------------------------------- cost redone from the record alone
+
+@pytest.mark.parametrize("mode", ["current", "historical"])
+def test_cost_redone_from_the_record_matches_the_engine(mode):
+    """A person with the info box alone (inputs, index values, harvest $/ton x tons, acre-ft x
+    water price, installed system cost / life) gets the engine's cost within $0.01."""
+    from backend import regions, simulate as engine
+    from backend.schemas import SimulateRequest
+    from conftest import make_weather
+    from hand_calculator import redo_cost
+    ctx = regions.build_context({"state": "CA", "county": "Merced", "in_california": True})
+    req = SimulateRequest.model_validate({
+        "location": {"lat": 37.3, "lon": -120.48}, "years": [2001, 2004], "price_mode": mode,
+        "blocks": [
+            {"id": "a", "crop": "almonds", "acres": 40, "irrigation": "drip", "start_month": 1, "end_month": 12},
+            {"id": "w", "crop": "walnuts", "acres": 25, "irrigation": "micro_sprinkler", "start_month": 1, "end_month": 12},
+            {"id": "t", "crop": "processing_tomatoes", "acres": 80.5, "irrigation": "drip", "start_month": 4, "end_month": 8},
+            {"id": "c", "crop": "corn", "acres": 15, "irrigation": "flood", "start_month": 5, "end_month": 9},
+            {"id": "o", "crop": "oats", "acres": 12, "irrigation": "flood", "start_month": 11, "end_month": 4},
+            {"id": "h", "crop": "alfalfa_hay", "acres": 30, "irrigation": "sprinkler", "start_month": 1, "end_month": 12}]})
+    wx = make_weather()
+    out = engine.simulate(req, wx=wx, context=ctx)
+    bt = engine.run_backtest(req, wx)
+    bt.context = engine.LocationContext.model_validate(ctx).model_dump()
+    engine.apply_money(bt, bt.context)
+    checked = 0
+    for b in out.blocks:
+        for y in b.yearly:
+            if y.cost is None:
+                continue
+            rec = out.calculations[f"block.{b.id}.{y.year}.cost"]
+            mine, engine_cost = redo_cost(rec), bt.seasons[b.id][y.year].money["cost"]
+            for part in ("inputs", "harvest", "water", "irrigation_system"):
+                assert abs(mine[part] - getattr(engine_cost, part)) <= 0.01, (rec["id"], part, mine[part])
+            assert mine["total"] == y.cost == rec["value"], rec["id"]
+            checked += 1
+    assert checked == 6 * 4
