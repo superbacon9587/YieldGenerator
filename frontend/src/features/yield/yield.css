@@ -90,3 +90,19 @@ td small.potential {
     grid-column: auto;
   }
 }
+.harvest-tooltip {
+  background: #fffefa;
+  padding: 10px 12px;
+  max-width: 300px;
+  line-height: 1.5;
+}
+.harvest-tooltip strong {
+  display: block;
+  margin-bottom: 4px;
+}
+.harvest-tooltip p {
+  margin: 0 0 4px;
+}
+.harvest-tooltip p:last-child {
+  margin-bottom: 0;
+}

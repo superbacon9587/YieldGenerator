@@ -1,6 +1,5 @@
 import { Wheat } from "lucide-react";
 import { CalcInfo } from "../provenance/CalcPopover.jsx";
-import { percent } from "../../domain.js";
 import { useYieldUnit } from "./YieldUnitContext.jsx";
 import { unitLabel } from "./yieldUnits.js";
 import { formatCell, getChartRows } from "../provenance/chartData.js";
@@ -31,11 +30,7 @@ export default function HarvestCard({ result, relativeYield }) {
           </>
         )}
       </strong>
-      <small>
-        {relativeYield == null
-          ? "Percent of full yield not available"
-          : `${percent(relativeYield)} of full yield`}
-      </small>
+      <small>Whole farm, average per year</small>
     </div>
   );
 }
