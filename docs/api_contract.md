@@ -519,3 +519,15 @@ The payload contains the model/data commit, financial coverage and exclusions, a
 **Costs are estimates, not farmer expenses.** They use the context-selected regional cost study excluding water, multiplied by acreage, plus modeled water cost. The study is held fixed across weather years, with no inflation adjustment. `optional.budget_usd` is a budget constraint/check, never an expense observation or a replacement for production cost. No actual-cost override was added here.
 
 Dollar totals still include only entries with all required financial inputs. Harvest/water totals can have broader coverage; `excluded_financial_blocks` makes that explicit. These dollar values are modeled margins on priced crops, not verified net farm income. The audit surfaces conflicting cost study year versus PDF-filename metadata as provisional instead of claiming it was verified. Tracing sources is separate from validating predictive accuracy.
+
+
+### Expense and sales-unit trace additions
+
+Each block-year in `calculation_details.blocks[].yearly[]` also includes `surface_water_cost`, `groundwater_cost`, and `pounds_per_sale_unit`. These come from the same applied-water amount, shares, price lookup, and conversion constants used by the simulation. Surface and groundwater costs add to `water_cost`; adding `production_cost_excl_water` gives the unrounded crop cost when required financial inputs are present. `sale_quantity * pounds_per_sale_unit` equals the modeled harvest in pounds. Financial charts retain the API's financially supported crop scope; they do not roll water costs from an otherwise unpriced crop into the cost total.
+
+
+### Fixed harvest reference and verified study detail
+
+`yield_weight[].reference_relative_yield` records the uncapped-water median relative yield for that crop/calendar/soil/backtest window. The backtest captures this while calculating unrestricted water demand. Harvest and revenue use this same reference even when farm water is capped, rather than renormalizing yield loss away. `calculation_details` retains the legacy `median_relative_yield` key for this fixed reference.
+
+Where matched to the audited publisher PDF, each calculation trace includes `verified_cost_study` with its source URL/hash, cover year, page/table, operating-cost basis, and non-water category amounts per acre. Other studies remain unaudited and return null for that metadata. PDF rounded group totals are reconciled with an explicit source-table rounding entry. Financial values mean operating margins, not net income. See source-audit.md for checked and unchecked assumptions.

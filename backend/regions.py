@@ -179,8 +179,8 @@ def _production_costs(t: Tables, region: str | None, crops: list[str], notes: li
         row = t.costs[(crop, used)]
         source = f"UC Davis cost study {row['source']} ({row['study_year']}, {used})"
         if region and used != region:
-            source += f"; used because {region} has no {label.lower()} study"
-            notes.append(f"{label} production cost uses the {used} study (no study for {region}).")
+            source += f"; used because {region} has no loaded {label.lower()} study"
+            notes.append(f"{label} production cost uses the {used} study (no loaded study for {region}).")
         out[crop] = {
             "cost_excl_water": float(row["cost_excl_water"]),
             "unit": COST_UNIT,

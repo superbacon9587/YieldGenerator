@@ -45,6 +45,24 @@ export function MetricInfo({ metric = "summary", blockId, year, label }) {
     </button>
   );
 }
+export function CalculationLink({
+  metric = "summary",
+  blockId,
+  year,
+  children,
+}) {
+  const open = useContext(Context);
+  if (!open) return null;
+  return (
+    <button
+      type="button"
+      className="text-button"
+      onClick={() => open({ metric, blockId, year })}
+    >
+      {children ?? "View source records and exact calculation"}
+    </button>
+  );
+}
 function Source({ item }) {
   if (!item) return null;
   return (
@@ -91,9 +109,10 @@ function Equations({ metric, row: r, block }) {
         <b>{n(r.harvest_tons_per_acre)} US tons/acre</b>
       </p>
       <p>
-        Denominator: median modeled relative yield over all the selected
-        backtest years for this crop entry, not an observed harvest for this
-        year.
+        Denominator: median modeled relative yield with uncapped water over the
+        selected years for this crop and calendar. It stays fixed when your
+        water limit changes, rather than normalizing away the yield loss. This
+        is a model calibration, not an observed harvest.
       </p>
       <p className="equation">
         {n(r.harvest_tons_per_acre)} tons/acre × {n(block.acres)} acres ={" "}
@@ -121,8 +140,9 @@ function Equations({ metric, row: r, block }) {
         explanation.
       </p>
       <p className="equation">
-        {n(r.sale_quantity)} {r.crop_price?.unit.replace(/^\$\s*\/\s*/, "") ?? "sale units"} × {n(r.crop_price?.value)}{" "}
-        {r.crop_price?.unit} ={" "}
+        {n(r.sale_quantity)}{" "}
+        {r.crop_price?.unit.replace(/^\$\s*\/\s*/, "") ?? "sale units"} ×{" "}
+        {n(r.crop_price?.value)} {r.crop_price?.unit} ={" "}
         <b>{preciseMoney(r.revenue_unrounded)} sales revenue</b>
       </p>
       <p className="equation">

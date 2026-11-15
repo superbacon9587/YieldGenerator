@@ -80,3 +80,13 @@ Use What if things were different on Results to edit a crop entry's crop, acreag
 Click the information button beside a summary or crop-year metric. The side panel shows actual annual inputs and formulas, the selected price year (which can differ from the weather year), source records, and a NASA query for the exact season/grid. Select a crop and year to inspect harvest, sales/cost/margin, water, rain, crop ET, heat, or GDD. Whole-period view lists annual totals and the sum/divisor for the selected average. The Download export includes the calculation payload.
 
 Costs are regional reference estimates plus modeled water, not actual farm expenses. The budget field is a spending limit. The results banner reconciles sales minus cost and names missing-financial-data crops. Revenue now uses the same median-normalized harvest quantity as displayed harvest, so financial estimates can change. Data citation is not model validation; provisional coefficients and conflicting cost-study metadata are disclosed. Older backend/demo responses without audit inputs get an explicit unavailable explanation.
+
+## Follow the money
+
+After a backtest, click Profit, Cost, or Sales in the historical chart. Bars show crop contributions and the dark line marks the included farm total. Profit gains and losses stack on opposite sides of zero. Select Financial year (or click a chart year) for the corresponding crop table. Any separate rounding adjustment is shown explicitly.
+
+On Cost, choose By crop or By expense. Expense amounts come from the backend trace: regional non-water cost, surface water, groundwater pumping. The source extract does not provide separate labor/seed/fertilizer category amounts, so none are invented. Missing trace inputs disable the expense view; missing crop financial inputs stay unavailable and are excluded consistently with the API totals.
+
+On Sales, select a crop and follow five numbered steps: source baseline yield, modeled weather adjustment, acreage, conversion into the price unit and price source year, then crop sales. Inspect exact numbers opens the source panel for that crop/year. The Follow the sales calculation link above the chart opens this view directly.
+
+The Cost crop detail can expand verified PDF categories for the selected acreage. Almond Sacramento 2024 and corn Sacramento/Northern San Joaquin 2015 were checked against publisher PDFs; other cost extracts are not independently verified here. Financial values are operating margins, excluding separate overhead/establishment. A water-cap regression was fixed by holding the uncapped harvest calibration constant across water-limited runs. See docs/source-audit.md and the source panel for limitations.

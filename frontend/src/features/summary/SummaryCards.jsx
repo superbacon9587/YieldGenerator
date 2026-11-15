@@ -50,13 +50,13 @@ export default function SummaryCards({ result }) {
         relativeYield={s.avg_relative_yield}
       />
       <Card
-        label="Total estimated margin"
+        label="Total operating margin"
         value={money(s.total_profit)}
         detail={`Over ${years} years`}
         icon={PiggyBank}
       />
       <Card
-        label="Estimated margin per year"
+        label="Operating margin per year"
         value={money(s.avg_profit)}
         detail={
           s.avg_cost == null

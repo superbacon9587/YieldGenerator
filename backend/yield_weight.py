@@ -17,7 +17,7 @@ Scaling against a typical year:
 
         tons_per_acre = baseline_tons_per_acre x relative_yield / median relative_yield
 
-    where the median is taken over every backtest year of that block. A typical
+    where public backtests use the median from the uncapped-water reference run over the selected years, held fixed when a water cap is applied. Standalone helpers without a reference retain their legacy median behavior. A typical
     year shows the typical county harvest, a drought year shows less, and a good
     year shows a bit more. When the median is 0 or missing, or the crop has no
     baseline yield, the weights are null.
@@ -31,9 +31,7 @@ from statistics import median
 from backend import units
 from backend.schemas import BlockOut, BlockYieldWeightOut, YieldWeightYearOut
 
-ASSUMPTION = ("Harvest weight is the selected county or statewide median yield scaled by how each year's relative "
-              "yield compares with this block's median year, so a typical year shows a "
-              "typical county harvest.")
+ASSUMPTION = ("Harvest weight uses the county or statewide median yield and an uncapped-water reference calibration. The reference is held fixed when applying a farm water limit; yield losses are not normalized away.")
 
 
 # ---------------------------------------------------------------- shared conversion
@@ -54,10 +52,11 @@ def _median_or_none(values: Sequence[float | None]) -> float | None:
     return median(present) if present else None
 
 
-def scale_to_tons(base_tpa: float | None, relative_yields: Sequence[float | None]
+def scale_to_tons(base_tpa: float | None, relative_yields: Sequence[float | None],
+                  reference_relative_yield: float | None = None
                   ) -> list[float | None]:
     """tons_per_acre for each relative yield, scaled against their median."""
-    typical = _median_or_none(relative_yields)
+    typical = reference_relative_yield if reference_relative_yield is not None else _median_or_none(relative_yields)
     if base_tpa is None or not typical:
         return [None] * len(relative_yields)
     return [None if ry is None else base_tpa * ry / typical for ry in relative_yields]
@@ -108,7 +107,8 @@ def _mean(values: Sequence[float | None]) -> float | None:
     return sum(present) / len(present) if present else None
 
 
-def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
+def build_block(block: BlockOut, context: Mapping, notes: dict | None = None,
+                reference_relative_yield: float | None = None
                 ) -> BlockYieldWeightOut:
     """Yield weight for one block. Unknown units become nulls plus a note."""
     base_info = (context.get("baseline_yields") or {}).get(block.crop) or {}
@@ -126,7 +126,7 @@ def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
               "is shown as no data."] = None
 
     ry = [r.relative_yield for r in block.yearly]
-    tpa = scale_to_tons(base, ry)
+    tpa = scale_to_tons(base, ry, reference_relative_yield)
     yearly = [
         YieldWeightYearOut(
             year=r.year,
@@ -142,6 +142,7 @@ def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
         acres=block.acres,
         source_unit=source_unit,
         conversion=conversion,
+        reference_relative_yield=reference_relative_yield if reference_relative_yield is not None else _median_or_none(ry),
         yearly=yearly,
         avg_tons=_round(_mean([None if t is None else t * block.acres for t in tpa]), 2),
         avg_tons_per_acre=_round(_mean(tpa), 3),
@@ -149,9 +150,10 @@ def build_block(block: BlockOut, context: Mapping, notes: dict | None = None
 
 
 def build_yield_weight(blocks: Sequence[BlockOut], context: Mapping,
-                       notes: dict | None = None) -> list[BlockYieldWeightOut]:
+                       notes: dict | None = None, *,
+                       reference_relative_yields: Mapping | None = None) -> list[BlockYieldWeightOut]:
     """The "yield_weight" response list, one entry per block in request order."""
-    return [build_block(b, context, notes) for b in blocks]
+    return [build_block(b, context, notes, (reference_relative_yields or {}).get(b.id)) for b in blocks]
 
 
 def avg_yield_tons(yield_weight: Sequence[BlockYieldWeightOut]) -> float | None:

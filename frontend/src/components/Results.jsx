@@ -53,6 +53,7 @@ import {
 } from "../features/yield/yieldUnits.js";
 import SummaryCards from "../features/summary/SummaryCards.jsx";
 import BudgetBanner from "../features/summary/BudgetBanner.jsx";
+import FinancialChart from "../features/finance/FinancialChart.jsx";
 import ProductionChart from "../features/summary/ProductionChart.jsx";
 import SaveSetup from "../features/compare/SaveSetup.jsx";
 import { periodLabel } from "../features/summary/landBudget.js";
@@ -247,18 +248,29 @@ export default function Results({ farm, result, mock, onBack }) {
         <BudgetBanner result={result} />
         <SummaryCards result={result} />
         <MoneyExplanation result={result} />
+        <button
+          className="text-button"
+          onClick={() => {
+            setChart("sales");
+            document
+              .getElementById("history-chart")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          }}
+        >
+          Follow the sales calculation, crop by crop <ArrowUpRight size={15} />
+        </button>
         <p className="yield-note">
           <Info size={15} />
           <span>
-            Harvest weight starts from the selected county or statewide median NASS yield
-            and moves up or down with each year's growing conditions. The
-            percent of potential compares against a crop with no water or heat
-            stress. The Production tab shows each crop entry's total harvest
-            weight.
+            Harvest weight starts from the selected county or statewide median
+            NASS yield and moves up or down with each year's growing conditions.
+            The percent of potential compares against a crop with no water or
+            heat stress. The Production tab shows each crop entry's total
+            harvest weight.
           </span>
         </p>
         <Timeline blocks={farm.blocks} compact />
-        <section className="panel chart-panel">
+        <section className="panel chart-panel" id="history-chart">
           <div className="panel-heading">
             <div>
               <span className="eyebrow">THE HISTORICAL PICTURE</span>
@@ -273,21 +285,27 @@ export default function Results({ farm, result, mock, onBack }) {
               </h2>
             </div>
             <div className="segmented chart-tabs" aria-label="Chart view">
-              {["yield", "water", "profit", "production"].map((key) => (
-                <button
-                  key={key}
-                  aria-pressed={chart === key}
-                  onClick={() => setChart(key)}
-                >
-                  {key === "yield"
-                    ? "Yield"
-                    : key === "water"
-                      ? "Water"
-                      : key === "profit"
-                        ? "Profit"
-                        : "Production"}
-                </button>
-              ))}
+              {["yield", "water", "profit", "cost", "sales", "production"].map(
+                (key) => (
+                  <button
+                    key={key}
+                    aria-pressed={chart === key}
+                    onClick={() => setChart(key)}
+                  >
+                    {key === "yield"
+                      ? "Yield"
+                      : key === "water"
+                        ? "Water"
+                        : key === "profit"
+                          ? "Profit"
+                          : key === "cost"
+                            ? "Cost"
+                            : key === "sales"
+                              ? "Sales"
+                              : "Production"}
+                  </button>
+                ),
+              )}
             </div>
           </div>
           {chart === "yield" ? (
@@ -297,6 +315,13 @@ export default function Results({ farm, result, mock, onBack }) {
               <p className="caption">{unit}</p>
               <ProductionChart result={result} />
             </>
+          ) : ["profit", "cost", "sales"].includes(chart) ? (
+            <FinancialChart
+              result={result}
+              mode={chart}
+              year={Number(year)}
+              onYear={setYear}
+            />
           ) : (
             <>
               <p className="caption">
@@ -391,15 +416,6 @@ export default function Results({ farm, result, mock, onBack }) {
                 </ResponsiveContainer>
               </div>
             </>
-          )}
-          {chart === "profit" && (
-            <p className="caption">
-              {overBudget.size > 0 &&
-                "Amber outline: farm cost was above your budget that year. "}
-              Missing profit remains unavailable, not zero. Farm financial
-              totals may include only crops with price and cost data; check the
-              assumptions.
-            </p>
           )}
         </section>
         <section className="panel year-details">

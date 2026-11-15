@@ -23,6 +23,8 @@ def test_harvest_sales_cost_and_margin_share_the_same_quantity(mode):
                 continue
             assert r["sale_quantity"]*r["crop_price"]["value"] == pytest.approx(r["revenue_unrounded"])
             assert r["cost_unrounded"] == pytest.approx(r["production_cost_excl_water"]+r["water_cost"])
+            assert r["water_cost"] == pytest.approx(r["surface_water_cost"]+r["groundwater_cost"])
+            assert r["sale_quantity"]*r["pounds_per_sale_unit"] == pytest.approx(r["harvest_tons"]*2000)
             assert r["revenue_unrounded"]-r["cost_unrounded"] == pytest.approx(r["profit_unrounded"])
             assert abs(r["displayed"]["revenue"]-r["revenue_unrounded"]) <= .5
             assert r["production_cost_excl_water"] == 3000*40
@@ -62,5 +64,28 @@ def test_conflicting_cost_source_year_is_flagged_not_claimed_verified():
     ctx = regions.build_context({"state":"CA", "county":"Merced", "in_california":True})
     out = engine.simulate(request(), wx=make_weather(), context=ctx)
     almond = out.calculation_details["blocks"][0]["yearly"][0]
-    assert any("2024" in w and "2022" in w for w in almond["source_warnings"])
+    assert almond["verified_cost_study"]["cover_year"] == 2024
+    assert almond["verified_cost_study"]["pdf_page"] == 19
+    assert not any("has not been reconciled" in w for w in almond["source_warnings"])
     assert almond["production_cost_source"]["region"] == "Sacramento Valley"
+
+def test_water_limit_reduces_absolute_harvest_and_sales_without_recalibration():
+    req = request()
+    req.blocks = [req.blocks[0]]
+    wx,ctx=make_weather(),make_context()
+    free=engine.simulate(req,wx=wx,context=ctx,include_comparisons=False)
+    cap=req.model_copy(deep=True);cap.optional.water_available_af=20
+    limited=engine.simulate(cap,wx=wx,context=ctx,include_comparisons=False)
+    assert limited.yield_weight[0].reference_relative_yield == free.yield_weight[0].reference_relative_yield
+    assert sum(r.tons for r in limited.yield_weight[0].yearly) < sum(r.tons for r in free.yield_weight[0].yearly)
+    assert sum(r.revenue for r in limited.blocks[0].yearly) < sum(r.revenue for r in free.blocks[0].yearly)
+    for row,harvest in zip(limited.blocks[0].yearly,limited.yield_weight[0].yearly):
+        assert harvest.tons == pytest.approx(1.0*row.relative_yield/free.yield_weight[0].reference_relative_yield*40,abs=.01)
+
+
+def test_verified_pdf_categories_reconcile_to_extracted_nonwater_cost():
+    from backend.study_audit import studies
+    for study in studies():
+        assert sum(study['nonwater_categories_per_acre'].values()) == study['nonwater_cost_per_acre']
+        assert study['operating_cost_per_acre']-study['water_cost_per_acre'] == study['nonwater_cost_per_acre']
+        assert len(study['sha256']) == 64

@@ -498,6 +498,7 @@ class Backtest:
     context: dict = field(default_factory=dict)      # get_location_context output
     water_cost_per_af: dict[int, float | None] = field(default_factory=dict)
     money_notes: list[str] = field(default_factory=list)
+    reference_relative_yields: dict[str, float] = field(default_factory=dict)
 
 
 def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
@@ -508,11 +509,14 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
     years = list(range(request.years[0], request.years[1] + 1))
     seasons: dict[str, dict[int, BlockSeason]] = {b.id: {} for b in request.blocks}
     any_capped = False
+    free_relative = {b.id: [] for b in request.blocks}
     normals = {b.id: normal_heat_days(b, wx) for b in request.blocks}
 
     for year in years:
         free = {b.id: simulate_block_season(b, year, wx, soil, normal_heat=normals[b.id])
                 for b in request.blocks}
+        for b in request.blocks:
+            free_relative[b.id].append(round(free[b.id].relative_yield, 3))
         total_gross = sum(s.gross_need_af for s in free.values())
         if cap is not None and total_gross > cap:
             for b in request.blocks:
@@ -537,7 +541,7 @@ def run_backtest(request: SimulateRequest, wx: pd.DataFrame) -> Backtest:
             + ", ".join(unverified) + ".")
     grid = (float(wx.attrs.get("lat", request.location.lat)),
             float(wx.attrs.get("lon", request.location.lon)))
-    return Backtest(request, years, grid, seasons, assumptions)
+    return Backtest(request, years, grid, seasons, assumptions, reference_relative_yields={key: median(values) for key, values in free_relative.items()})
 
 
 # ---------------------------------------------------------------- money
@@ -596,7 +600,7 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
         base = ctx["baseline_yields"].get(b.crop)
         prod = ctx["production_costs"].get(b.crop)
         relative = [round(bt.seasons[b.id][y].relative_yield, 3) for y in bt.years]
-        typical = median(relative)
+        typical = bt.reference_relative_yields.get(b.id, median(relative))
         missing: dict[str, None] = {}
         if not typical:
             missing["nonzero median modeled yield"] = None
@@ -621,7 +625,7 @@ def apply_money(bt: Backtest, ctx: dict) -> None:
             notes[f"Block {b.id} ({label}) has no {' or '.join(missing)}, so its revenue, "
                   "cost, and profit are shown as no data."] = None
 
-    notes["Revenue uses the same median-normalized harvest quantity as the harvest-weight display."] = None
+    notes["Revenue and harvest use the same uncapped-reference calibration; water-limited scenarios do not recalibrate away their yield losses."] = None
     if mode == "current":
         notes["Prices: the latest USDA NASS price for each crop is used for every year."] = None
     else:
@@ -710,7 +714,7 @@ def build_response(bt: Backtest) -> SimulateResponse:
 
     # Harvest weight in tons (backend/yield_weight.py).
     weight_notes: dict[str, None] = {}
-    weights = yield_weight.build_yield_weight(blocks, ctx, weight_notes)
+    weights = yield_weight.build_yield_weight(blocks, ctx, weight_notes, reference_relative_yields=bt.reference_relative_yields)
     assumptions.extend(yield_weight.assumptions(weights, weight_notes))
 
     return SimulateResponse(

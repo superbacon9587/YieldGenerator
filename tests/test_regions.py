@@ -83,7 +83,7 @@ def test_merced_context():
     # SJV North has its own alfalfa study; almonds fall back to a neighbor region.
     assert ctx["production_costs"]["alfalfa_hay"]["region"] == "San Joaquin Valley North"
     assert ctx["production_costs"]["almonds"]["region"] == "Sacramento Valley"
-    assert "San Joaquin Valley North has no almond study" in ctx["production_costs"]["almonds"]["source"]
+    assert "San Joaquin Valley North has no loaded almond study" in ctx["production_costs"]["almonds"]["source"]
 
 
 def test_sacramento_context():

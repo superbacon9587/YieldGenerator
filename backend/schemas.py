@@ -209,6 +209,7 @@ class BlockYieldWeightOut(BaseModel):
     block_id: str
     crop: Crop
     acres: float
+    reference_relative_yield: float | None = Field(default=None, description="Median relative yield under uncapped water for the same crop, months, soil, and backtest years")
     source_unit: str | None = Field(
         description='Unit of the NASS baseline yield, for example "BU / ACRE". '
                     "None when the crop has no baseline yield")

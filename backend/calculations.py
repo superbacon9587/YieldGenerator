@@ -13,7 +13,7 @@ from pathlib import Path
 from statistics import mean, median
 from urllib.parse import urlencode
 import numpy as np
-from backend import economics, reference, power_client, yield_weight
+from backend import economics, reference, power_client, yield_weight, study_audit
 
 ROOT = Path(__file__).resolve().parent.parent
 REPO = "https://github.com/superbacon9587/YieldGenerator"
@@ -47,7 +47,7 @@ def build(bt, response, wx):
     for b, out in zip(req.blocks, response.blocks):
         base = ctx["baseline_yields"].get(b.crop)
         cost = ctx["production_costs"].get(b.crop)
-        typical = median(r.relative_yield for r in out.yearly)
+        typical = bt.reference_relative_yields.get(b.id, median(r.relative_yield for r in out.yearly))
         params = reference.crop_params(b.crop)
         normal = engine.normal_heat_days(b, prepared)
         base_tons = yield_weight.baseline_tons_per_acre(b.crop, ctx) if base else None
@@ -56,14 +56,17 @@ def build(bt, response, wx):
         if yield_rows and base and round(median(float(r["yield"]) for r in yield_rows), 3) != base["value"]:
             yield_rows = []  # injected/custom context has no matching committed extract
         cost_rows = [r for r in records("data/reference/prices/production_costs.csv") if r["crop"] == b.crop and cost and r["region"] == cost["region"] and r["cost_excl_water"] and float(r["cost_excl_water"]) == cost["cost_excl_water"]]
+        verified_study = study_audit.match(b.crop, cost)
         cost_warnings = []
         for record in cost_rows:
             filename_year = re.search(r"(20[0-9]{2})\.pdf", record["source"])
-            if filename_year and filename_year.group(1) != record["study_year"]:
+            if filename_year and filename_year.group(1) != record["study_year"] and verified_study is None:
                 cost_warnings.append(f"Cost record study_year is {record['study_year']} but its cited filename contains {filename_year.group(1)}. This source metadata has not been reconciled; treat this cost as provisional.")
         if yield_rows and max(int(record["year"]) for record in yield_rows) > req.years[1]:
             cost_warnings.append("The baseline yield extract includes reference years after this backtest ends. This is a retrospective scenario using later reference data, not an out-of-sample historical prediction.")
         sources = [source("Baseline yield: exact input extract", path, yield_rows), source("Regional production-cost input extract", "data/reference/prices/production_costs.csv", cost_rows), source("Crop coefficients and their verification flags", "data/reference/crops.json", [reference.get_crop(b.crop)]), source("Water and pump assumptions", "data/reference/prices/defaults.json", [defaults]), source("Irrigation efficiencies", "data/reference/irrigation.json")]
+        if verified_study:
+            sources.append({"label": f"Verified original UC cost study: {verified_study['cover_year']}, {verified_study['table']}, PDF page {verified_study['pdf_page']}", "url": verified_study['url']+f"#page={verified_study['pdf_page']}", "records": [verified_study]})
         yearly = []
         for row in out.yearly:
             s = bt.seasons[b.id][row.year]
@@ -82,9 +85,13 @@ def build(bt, response, wx):
                 "harvest_tons": harvest_tpa*b.acres if harvest_tpa is not None else None,
                 "baseline_yield": base, "baseline_tons_per_acre": base_tons, "median_relative_yield": typical,
                 "crop_price": vars(price) if price else None, "electricity_price": vars(electricity) if electricity else None,
+                "pounds_per_sale_unit": economics.unit_to_lb(price.unit, b.crop) if price else None,
                 "sale_quantity": economics.convert_quantity(harvest_tpa*b.acres, "TON", price.unit, b.crop) if harvest_tpa is not None and price else None,
                 "revenue_unrounded": s.revenue, "cost_unrounded": s.cost, "profit_unrounded": s.profit,
                 "production_cost_excl_water": production_cost, "production_cost_per_acre": cost["cost_excl_water"] if cost else None,
+                "surface_water_cost": s.water_applied_af * req.optional.surface_water_share * ctx["surface_water_price_per_af"] if ctx.get("surface_water_price_per_af") is not None else (0.0 if req.optional.surface_water_share == 0 else None),
+                "groundwater_cost": s.water_applied_af * (1-req.optional.surface_water_share) * economics.pumping_cost_per_af(defaults["well_lift_ft"], defaults["pump_efficiency"], electricity.value, electricity.unit) if electricity else (0.0 if req.optional.surface_water_share == 1 else None),
+                "verified_cost_study": verified_study,
                 "production_cost_source": cost, "source_warnings": cost_warnings, "water_cost": water_cost,
                 "applied_water_unrounded_af": s.water_applied_af, "blended_water_price_per_af": bt.water_cost_per_af[row.year],
                 "surface_share": req.optional.surface_water_share, "surface_price_per_af": ctx.get("surface_water_price_per_af"),
@@ -104,7 +111,7 @@ def build(bt, response, wx):
     financial = [r for r in totals if r.profit is not None]
     excluded = [{"block_id": b.id, "crop": b.crop, "years": [r.year for r in b.yearly if r.profit is None]} for b in response.blocks if any(r.profit is None for r in b.yearly)]
     return {"version": 1, "model_revision": revision(), "data_revision": revision(), "price_mode": req.price_mode,
-        "cost_basis": "Regional reference-study estimates plus modeled water cost. No farmer operating expenses were supplied. The budget is a spending limit, not an expense input.",
+        "cost_basis": "Regional study operating costs plus modeled water; cash/non-cash overhead and establishment are not included. No farmer operating expenses were supplied. The budget is a spending limit, not an expense input.",
         "money_basis": "Revenue uses the same median-normalized harvest quantity as the harvest display; costs use a fixed regional study plus modeled water. Dollar results are modeled margins, not observed farm accounts.",
         "validation_status": "Model estimates; source tracing does not establish predictive accuracy. Crop coefficients marked verify=true and pump/water assumptions still require review.",
         "rounding_note": "Calculations use unrounded internal values; crop dollar rows and farm totals are rounded to whole dollars. Displayed rounded inputs may differ slightly when multiplied.",

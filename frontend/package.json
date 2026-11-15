@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test src/domain.test.js src/api.test.js src/features/summary/landBudget.test.js src/features/compare/savedSetups.test.js src/features/yield/yield.test.js src/features/optimize/optimize.test.js src/features/provenance/audit.test.js"
+    "test": "node --test src/domain.test.js src/api.test.js src/features/summary/landBudget.test.js src/features/compare/savedSetups.test.js src/features/yield/yield.test.js src/features/optimize/optimize.test.js src/features/provenance/audit.test.js src/features/finance/finance.test.js"
   },
   "dependencies": {
     "lucide-react": "^1.73.0",

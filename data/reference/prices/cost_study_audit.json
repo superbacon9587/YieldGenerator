@@ -1,0 +1,69 @@
+{
+  "checked_at_utc": "2026-11-15T06:19:29.288743+00:00",
+  "method": "Publisher PDFs downloaded, cover/table text inspected and cost pages visually checked; categories follow printed group totals. Residual rounding is explicit.",
+  "studies": [
+    {
+      "crop": "almonds",
+      "regions": [
+        "Sacramento Valley"
+      ],
+      "legacy_filename": "almonds_sacramento_valley_2022.pdf",
+      "cover_year": 2024,
+      "pdf_page": 19,
+      "table": "Table 3",
+      "title": "UC sample costs to establish an orchard and produce almonds, Sacramento Valley, micro-sprinkler, 2024",
+      "url": "https://www.almonds.org/sites/default/files/2025-05/2024SacValleyAlmonds7.5.24.%20Final%20draft.pdf",
+      "sha256": "30f9c48221de7b9af86c8c3b44f3d0b13feafdff09c5bfd674daf4d5dc67a64d",
+      "operating_cost_per_acre": 3720,
+      "water_cost_per_acre": 637,
+      "nonwater_cost_per_acre": 3083,
+      "nonwater_categories_per_acre": {
+        "Crop protection supplies": 534,
+        "Custom services, pollination and harvest": 1462,
+        "Irrigation additives": 6,
+        "Fertilizer": 403,
+        "Labor": 501,
+        "Machinery operations": 115,
+        "Operating-capital interest": 63,
+        "Printed-table rounding adjustment": -1
+      },
+      "limitations": [
+        "Only operating costs are included; cash and non-cash overhead and orchard establishment are excluded.",
+        "Per-acre operating inputs are held fixed. Harvest-dependent services and financing are not repriced when model yield or irrigation changes.",
+        "The legacy local filename says 2022, but this publication cover and table say 2024."
+      ]
+    },
+    {
+      "crop": "corn",
+      "regions": [
+        "Sacramento Valley",
+        "San Joaquin Valley North"
+      ],
+      "legacy_filename": "corn_sjv_north_sacramento_2015.pdf",
+      "cover_year": 2015,
+      "pdf_page": 11,
+      "table": "Table 2",
+      "title": "UC sample costs to produce field corn, Sacramento and Northern San Joaquin Valleys, 2015",
+      "url": "https://coststudyfiles.ucdavis.edu/uploads/cs_public/03/dc/03dc4496-32af-47c6-b479-38e1d27c134e/15cornsacramentovalleyfinaldraftjuly20.pdf",
+      "sha256": "5eca48edfdd3d4da39763c9fe3ec4eac6c14ca5df7b44bfe1443347fcd170aaa",
+      "operating_cost_per_acre": 1118,
+      "water_cost_per_acre": 168,
+      "nonwater_cost_per_acre": 950,
+      "nonwater_categories_per_acre": {
+        "Fertilizer": 230,
+        "Crop protection supplies": 44,
+        "Seed": 67,
+        "Custom field operations": 54,
+        "Study land rent": 230,
+        "Labor": 173,
+        "Machinery operations": 131,
+        "Operating-capital interest": 22,
+        "Printed-table rounding adjustment": -1
+      },
+      "limitations": [
+        "Only operating costs are included; separate cash and non-cash overhead are excluded.",
+        "Land rent and harvest-related costs remain fixed at the study per-acre amounts, not recalculated from current output prices."
+      ]
+    }
+  ]
+}
