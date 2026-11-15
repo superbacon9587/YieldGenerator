@@ -192,7 +192,8 @@ export function inputReference(input) {
 /** Keep the process and result; substituted arithmetic remains in Download. */
 export function compactStep(step, index, count) {
   const left = step.text.split(" = ")[0];
-  let process = /^Sum of /i.test(left) ? "Sum yearly values" :
+  const summed = left.match(/^Sum of [\d,]+ yearly (sales|cost|harvest|water|yield) values/i);
+  let process = summed ? `Sum yearly ${summed[1]} values` : /^Sum of /i.test(left) ? "Sum yearly values" :
     left.includes(":") ? left.split(":")[0] :
     /\/ [\d,.]+ years/i.test(left) ? "Divide by years with data" :
     /lb\/ton|mm per|cents per/i.test(left) ? "Convert units" :
@@ -204,4 +205,15 @@ export function formulaEquation(record) {
   const label = record.label.split(",")[0].replace(/^Estimated /i, "");
   const seasonal = /\.(?:19|20)\d{2}\./.test(record.id);
   return `${label}${seasonal ? "(year)" : ""} = ${record.formula_text}`;
+}
+
+/** Define yearly money rows once rather than repeating an equation for every year. */
+export function tableEquations(record) {
+  const names = record.inputs.map(input => input.name);
+  const equations = [];
+  if (names.some(name => /^(Farm |Crop )?sales, \d{4}$/i.test(name)))
+    equations.push("Sales(year) = sum of crop harvest(year) × crop selling price, using matching units");
+  if (names.some(name => /^(Farm |Crop )?cost, \d{4}$/i.test(name)))
+    equations.push("Cost(year) = sum of (crop acres × non-water cost per acre) + surface-water expense(year) + pumping electricity expense(year)");
+  return equations;
 }

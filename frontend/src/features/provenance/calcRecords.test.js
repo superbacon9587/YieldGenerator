@@ -125,3 +125,12 @@ test("calculation steps show process and answer without substituted input values
  assert.equal(compactStep({text:"Cost: 3.5 x 3 = 10.5, rounded to 11",result:11},0,1),"Cost = 11");
  assert.equal(formulaEquation({id:"block.a.2021.revenue",label:"Sales, Almonds, 2021",formula_text:"Harvest x price"}),"Sales(year) = Harvest x price");
 });
+
+test("yearly row equations appear once and steps omit substituted arithmetic", async () => {
+ const {tableEquations,compactStep}=await import("./calcRecords.js");
+ const rows={inputs:[{name:"Farm sales, 2020"},{name:"Farm sales, 2021"},{name:"Farm cost, 2020"}]};
+ assert.equal(tableEquations(rows).length,2);
+ assert.match(tableEquations(rows)[0],/^Sales\(year\) =/);
+ assert.equal(compactStep({text:"Sum of 2 yearly sales values: 10 + 20 = $30"},0,5),"Sum yearly sales values = $30");
+ assert.equal(compactStep({text:"Average sales: $30 / 2 years = $15"},1,5),"Average sales = $15");
+});
