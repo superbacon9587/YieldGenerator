@@ -38,6 +38,11 @@ import {
 } from "../domain.js";
 import { simulate } from "../api.js";
 import Timeline from "./Timeline.jsx";
+import {
+  CalculationProvider,
+  MetricInfo,
+  MoneyExplanation,
+} from "../features/provenance/CalculationDetails.jsx";
 import YieldWeightChart from "../features/yield/YieldWeightChart.jsx";
 import { useYieldUnit } from "../features/yield/YieldUnitContext.jsx";
 import { weightByBlock, weightRow } from "../features/yield/yieldData.js";
@@ -208,486 +213,560 @@ export default function Results({ farm, result, mock, onBack }) {
     setChange({ ...farm.blocks.find((b) => b.id === id) });
   }
   return (
-    <div className="results">
-      <div className="results-toolbar">
-        <button className="text-button" onClick={onBack}>
-          <ArrowLeft size={15} /> Edit farm
-        </button>
-        <div>
-          <SaveSetup farm={farm} result={result} />
-          <button className="secondary" onClick={() => window.print()}>
-            <Printer size={15} /> Print
+    <CalculationProvider result={result} farm={farm}>
+      <div className="results">
+        <div className="results-toolbar">
+          <button className="text-button" onClick={onBack}>
+            <ArrowLeft size={15} /> Edit farm
           </button>
-          <button
-            className="secondary"
-            onClick={() =>
-              download({
-                mode: mock ? "synthetic_demo" : "backend",
-                request: farm,
-                baseline: result,
-                scenario_request: scenarioInput,
-                scenario,
-              })
-            }
-          >
-            <Download size={15} /> Download
-          </button>
-        </div>
-      </div>
-      <div className="result-context">
-        <MapLabel location={result.location.label} />
-        <span className="period-line">{periodLabel(result.years)}</span>
-      </div>
-      <BudgetBanner result={result} />
-      <SummaryCards result={result} />
-      <p className="yield-note">
-        <Info size={15} />
-        <span>
-          Harvest weight starts from the county's typical (median) NASS yield
-          and moves up or down with each year's growing conditions. The percent
-          of potential compares against a crop with no water or heat stress.
-          The Production tab shows each crop entry's total harvest weight.
-        </span>
-      </p>
-      <Timeline blocks={farm.blocks} compact />
-      <section className="panel chart-panel">
-        <div className="panel-heading">
           <div>
-            <span className="eyebrow">THE HISTORICAL PICTURE</span>
-            <h2>
-              {chart === "yield"
-                ? "How yield changes across years"
-                : chart === "water"
-                  ? "Where the water goes"
-                  : chart === "production"
-                    ? "What each crop produced"
-                    : "The economics, year by year"}
-            </h2>
-          </div>
-          <div className="segmented chart-tabs" aria-label="Chart view">
-            {["yield", "water", "profit", "production"].map((key) => (
-              <button
-                key={key}
-                aria-pressed={chart === key}
-                onClick={() => setChart(key)}
-              >
-                {key === "yield"
-                  ? "Yield"
-                  : key === "water"
-                    ? "Water"
-                    : key === "profit"
-                      ? "Profit"
-                      : "Production"}
-              </button>
-            ))}
+            <SaveSetup farm={farm} result={result} />
+            <button className="secondary" onClick={() => window.print()}>
+              <Printer size={15} /> Print
+            </button>
+            <button
+              className="secondary"
+              onClick={() =>
+                download({
+                  mode: mock ? "synthetic_demo" : "backend",
+                  request: farm,
+                  baseline: result,
+                  scenario_request: scenarioInput,
+                  scenario,
+                })
+              }
+            >
+              <Download size={15} /> Download
+            </button>
           </div>
         </div>
-        {chart === "yield" ? (
-          <YieldWeightChart result={result} mock={mock} />
-        ) : chart === "production" ? (
-          <>
-            <p className="caption">{unit}</p>
-            <ProductionChart result={result} />
-          </>
-        ) : (
-          <>
-            <p className="caption">
-              {unit} · Shaded years are flagged by the backend, not detected by
-              this chart.
-              {mock ? " Demo dips are intentionally constructed." : ""}
-            </p>
-            <div
-              className="chart-wrap"
-              role="img"
-              aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are available in the year table below.`}
-            >
-              <ResponsiveContainer width="100%" height="100%">
-                {
-                  <BarChart
-                    data={chartRows}
-                    margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
-                  >
-                    <CartesianGrid
-                      strokeDasharray="3 4"
-                      vertical={false}
-                      stroke="#e5e9df"
-                    />
-                    <XAxis
-                      dataKey="year"
-                      tick={{ fontSize: 11 }}
-                      minTickGap={28}
-                    />
-                    <YAxis
-                      tickFormatter={(v) =>
-                        chart === "profit" ? `$${number(v / 1000)}k` : number(v)
-                      }
-                      tick={{ fontSize: 11 }}
-                      width={58}
-                    />
-                    {flagged.map((y) => (
-                      <ReferenceArea
-                        key={y}
-                        x1={y}
-                        x2={y + 1}
-                        fill="#d7be85"
-                        fillOpacity={0.16}
-                      />
-                    ))}
-                    <Tooltip
-                      formatter={(v, name) => [
-                        chart === "profit"
-                          ? money(v)
-                          : `${number(v, 1)} acre-ft`,
-                        name,
-                      ]}
-                      contentStyle={tooltipStyle}
-                    />
-                    <Legend
-                      iconType="circle"
-                      wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
-                    />
-                    {chart === "water" ? (
-                      result.blocks.map((b) => (
-                        <Bar
-                          key={b.id}
-                          dataKey={b.id}
-                          name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
-                          stackId="water"
-                          fill={CROPS[b.crop]?.color ?? "#557f65"}
-                          isAnimationActive={false}
-                        />
-                      ))
-                    ) : (
-                      <Bar
-                        dataKey="profit"
-                        name="Farm profit"
-                        radius={[3, 3, 0, 0]}
-                        isAnimationActive={false}
-                      >
-                        {chartRows.map((r) => (
-                          <Cell
-                            key={r.year}
-                            fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
-                            stroke={
-                              overBudget.has(r.year) ? "#d39a2c" : undefined
-                            }
-                            strokeWidth={overBudget.has(r.year) ? 3 : 0}
-                          />
-                        ))}
-                      </Bar>
-                    )}
-                  </BarChart>
-                }
-              </ResponsiveContainer>
+        <div className="result-context">
+          <MapLabel location={result.location.label} />
+          <span className="period-line">{periodLabel(result.years)}</span>
+        </div>
+        <BudgetBanner result={result} />
+        <SummaryCards result={result} />
+        <MoneyExplanation result={result} />
+        <p className="yield-note">
+          <Info size={15} />
+          <span>
+            Harvest weight starts from the selected county or statewide median NASS yield
+            and moves up or down with each year's growing conditions. The
+            percent of potential compares against a crop with no water or heat
+            stress. The Production tab shows each crop entry's total harvest
+            weight.
+          </span>
+        </p>
+        <Timeline blocks={farm.blocks} compact />
+        <section className="panel chart-panel">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">THE HISTORICAL PICTURE</span>
+              <h2>
+                {chart === "yield"
+                  ? "How yield changes across years"
+                  : chart === "water"
+                    ? "Where the water goes"
+                    : chart === "production"
+                      ? "What each crop produced"
+                      : "The economics, year by year"}
+              </h2>
             </div>
-          </>
-        )}
-        {chart === "profit" && (
-          <p className="caption">
-            {overBudget.size > 0 &&
-              "Amber outline: farm cost was above your budget that year. "}
-            Missing profit remains unavailable, not zero. Farm financial totals
-            may include only crops with price and cost data; check the
-            assumptions.
-          </p>
-        )}
-      </section>
-      <section className="panel year-details">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">LOOK A LITTLE CLOSER</span>
-            <h2>One season, crop by crop</h2>
-          </div>
-          <label className="inline-label">
-            Year
-            <select
-              value={year}
-              onChange={(e) => setYear(Number(e.target.value))}
-            >
-              {result.years.map((y) => (
-                <option key={y}>{y}</option>
-              ))}
-            </select>
-          </label>
-        </div>
-        <div className="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Crop entry</th>
-                <th>
-                  Crop water use
-                  <br />
-                  (inches)
-                </th>
-                <th>
-                  Effective rain
-                  <br />
-                  (inches)
-                </th>
-                <th>
-                  Applied water
-                  <br />
-                  (acre-ft)
-                </th>
-                <th>
-                  Harvest
-                  <br />({unitLabel(yieldUnit, true)})
-                </th>
-                <th>
-                  Total harvest
-                  <br />({unitLabel(yieldUnit, false)})
-                </th>
-                <th>Heat days</th>
-                <th>
-                  GDD
-                  <br />
-                  (°C-days)
-                </th>
-                <th>Profit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.blocks.map((b) => {
-                const r = b.yearly.find((r) => r.year === Number(year));
-                const w = weightRow(weights.get(b.id), Number(year));
-                const pct = potentialPercent(
-                  w?.relative_yield ?? r?.relative_yield,
-                );
-                return (
-                  <tr key={b.id}>
-                    <th>
-                      <span
-                        className="crop-dot"
-                        style={{ background: CROPS[b.crop]?.color }}
-                      />
-                      {CROPS[b.crop]?.name ?? b.crop}
-                      <small>
-                        {b.id} · {number(b.acres, 1)} acres
-                      </small>
-                    </th>
-                    <td>{number(r?.crop_water_use_in, 1)}</td>
-                    <td>{number(r?.effective_rain_in, 1)}</td>
-                    <td>{number(r?.water_applied_af, 1)}</td>
-                    <td>
-                      {formatWeight(w?.tons_per_acre, yieldUnit, true)}
-                      {pct && (
-                        <small className="potential">{pct} of potential</small>
-                      )}
-                    </td>
-                    <td>{formatWeight(w?.tons, yieldUnit, false)}</td>
-                    <td>{number(r?.heat_stress_days)}</td>
-                    <td>{number(r?.gdd)}</td>
-                    <td>{money(r?.profit)}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        <p className="caption">
-          GDD measures accumulated growing warmth. Heat days depend on the crop
-          thresholds in the backend.
-        </p>
-      </section>
-      <section className="panel what-if" id="what-if">
-        <div className="panel-heading">
-          <div>
-            <span className="eyebrow">
-              KEEP THE FARM. CHANGE A POSSIBILITY.
-            </span>
-            <h2>What if things were different?</h2>
-          </div>
-          <span className="scenario-symbol">↗</span>
-        </div>
-        <p className="subtle">
-          Compare against your original farm, using the same location and
-          historical years. Results below never overwrite the baseline above.
-        </p>
-        <div className="quick-actions">
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => compare("water")}
-          >
-            <ArrowDown size={15} /> Cut water budget 25%
-          </button>
-          <button
-            className="secondary"
-            disabled={busy}
-            onClick={() => compare("drip")}
-          >
-            <Droplets size={15} /> Compare all-drip irrigation
-          </button>
-        </div>
-        <p className="caption">
-          The water cut sets the budget to 75% of the baseline mean applied
-          water. Drip compatibility and installation costs are not assessed.
-        </p>
-        <details className="disclosure" open>
-          <summary>
-            Compare a crop, area, irrigation, or growing-window change
-          </summary>
-          <div className="scenario-form">
-            <label>
-              Crop entry
-              <select
-                value={selected}
-                onChange={(e) => chooseBlock(e.target.value)}
-              >
-                {farm.blocks.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {CROPS[b.crop]?.name ?? b.crop} · {b.id}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Try this crop
-              <select
-                value={change.crop}
-                onChange={(e) =>
-                  setChange({
-                    ...change,
-                    crop: e.target.value,
-                    ...(CROPS[e.target.value]?.perennial
-                      ? { start_month: 1, end_month: 12 }
-                      : {}),
-                  })
-                }
-              >
-                {Object.entries(CROPS).map(([key, c]) => (
-                  <option key={key} value={key}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Area (acres)
-              <input
-                type="number"
-                min="0.0001"
-                step="any"
-                value={change.acres}
-                onChange={(e) =>
-                  setChange({ ...change, acres: e.target.value })
-                }
-              />
-            </label>
-            <label>
-              Irrigation
-              <select
-                value={change.irrigation}
-                onChange={(e) =>
-                  setChange({ ...change, irrigation: e.target.value })
-                }
-              >
-                {Object.entries(IRRIGATION).map(([key, name]) => (
-                  <option key={key} value={key}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {["start_month", "end_month"].map((field) => (
-              <label key={field}>
-                {field === "start_month" ? "Start month" : "End month"}
-                <select
-                  value={change[field]}
-                  disabled={CROPS[change.crop]?.perennial}
-                  onChange={(e) =>
-                    setChange({ ...change, [field]: Number(e.target.value) })
-                  }
+            <div className="segmented chart-tabs" aria-label="Chart view">
+              {["yield", "water", "profit", "production"].map((key) => (
+                <button
+                  key={key}
+                  aria-pressed={chart === key}
+                  onClick={() => setChart(key)}
                 >
-                  {MONTHS.map((month, index) => (
-                    <option key={month} value={index + 1}>
-                      {month}
+                  {key === "yield"
+                    ? "Yield"
+                    : key === "water"
+                      ? "Water"
+                      : key === "profit"
+                        ? "Profit"
+                        : "Production"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {chart === "yield" ? (
+            <YieldWeightChart result={result} mock={mock} />
+          ) : chart === "production" ? (
+            <>
+              <p className="caption">{unit}</p>
+              <ProductionChart result={result} />
+            </>
+          ) : (
+            <>
+              <p className="caption">
+                {unit} · Shaded years are flagged by the backend, not detected
+                by this chart.
+                {mock ? " Demo dips are intentionally constructed." : ""}
+              </p>
+              <div
+                className="chart-wrap"
+                role="img"
+                aria-label={`${chart} chart across ${result.years.length} historical seasons. Exact values are available in the year table below.`}
+              >
+                <ResponsiveContainer width="100%" height="100%">
+                  {
+                    <BarChart
+                      data={chartRows}
+                      margin={{ top: 12, right: 15, left: 0, bottom: 0 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 4"
+                        vertical={false}
+                        stroke="#e5e9df"
+                      />
+                      <XAxis
+                        dataKey="year"
+                        tick={{ fontSize: 11 }}
+                        minTickGap={28}
+                      />
+                      <YAxis
+                        tickFormatter={(v) =>
+                          chart === "profit"
+                            ? `$${number(v / 1000)}k`
+                            : number(v)
+                        }
+                        tick={{ fontSize: 11 }}
+                        width={58}
+                      />
+                      {flagged.map((y) => (
+                        <ReferenceArea
+                          key={y}
+                          x1={y}
+                          x2={y + 1}
+                          fill="#d7be85"
+                          fillOpacity={0.16}
+                        />
+                      ))}
+                      <Tooltip
+                        formatter={(v, name) => [
+                          chart === "profit"
+                            ? money(v)
+                            : `${number(v, 1)} acre-ft`,
+                          name,
+                        ]}
+                        contentStyle={tooltipStyle}
+                      />
+                      <Legend
+                        iconType="circle"
+                        wrapperStyle={{ fontSize: 12, paddingTop: 20 }}
+                      />
+                      {chart === "water" ? (
+                        result.blocks.map((b) => (
+                          <Bar
+                            key={b.id}
+                            dataKey={b.id}
+                            name={`${CROPS[b.crop]?.name ?? b.crop} · ${b.id}`}
+                            stackId="water"
+                            fill={CROPS[b.crop]?.color ?? "#557f65"}
+                            isAnimationActive={false}
+                          />
+                        ))
+                      ) : (
+                        <Bar
+                          dataKey="profit"
+                          name="Farm profit"
+                          radius={[3, 3, 0, 0]}
+                          isAnimationActive={false}
+                        >
+                          {chartRows.map((r) => (
+                            <Cell
+                              key={r.year}
+                              fill={r.profit >= 0 ? "#4e795d" : "#bb684f"}
+                              stroke={
+                                overBudget.has(r.year) ? "#d39a2c" : undefined
+                              }
+                              strokeWidth={overBudget.has(r.year) ? 3 : 0}
+                            />
+                          ))}
+                        </Bar>
+                      )}
+                    </BarChart>
+                  }
+                </ResponsiveContainer>
+              </div>
+            </>
+          )}
+          {chart === "profit" && (
+            <p className="caption">
+              {overBudget.size > 0 &&
+                "Amber outline: farm cost was above your budget that year. "}
+              Missing profit remains unavailable, not zero. Farm financial
+              totals may include only crops with price and cost data; check the
+              assumptions.
+            </p>
+          )}
+        </section>
+        <section className="panel year-details">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">LOOK A LITTLE CLOSER</span>
+              <h2>One season, crop by crop</h2>
+            </div>
+            <label className="inline-label">
+              Year
+              <select
+                value={year}
+                onChange={(e) => setYear(Number(e.target.value))}
+              >
+                {result.years.map((y) => (
+                  <option key={y}>{y}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <div className="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Crop entry</th>
+                  <th>
+                    Crop water use
+                    <br />
+                    (inches)
+                  </th>
+                  <th>
+                    Effective rain
+                    <br />
+                    (inches)
+                  </th>
+                  <th>
+                    Applied water
+                    <br />
+                    (acre-ft)
+                  </th>
+                  <th>
+                    Harvest
+                    <br />({unitLabel(yieldUnit, true)})
+                  </th>
+                  <th>
+                    Total harvest
+                    <br />({unitLabel(yieldUnit, false)})
+                  </th>
+                  <th>Heat days</th>
+                  <th>
+                    GDD
+                    <br />
+                    (°C-days)
+                  </th>
+                  <th>Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {result.blocks.map((b) => {
+                  const r = b.yearly.find((r) => r.year === Number(year));
+                  const w = weightRow(weights.get(b.id), Number(year));
+                  const pct = potentialPercent(
+                    w?.relative_yield ?? r?.relative_yield,
+                  );
+                  return (
+                    <tr key={b.id}>
+                      <th>
+                        <span
+                          className="crop-dot"
+                          style={{ background: CROPS[b.crop]?.color }}
+                        />
+                        {CROPS[b.crop]?.name ?? b.crop}
+                        <small>
+                          {b.id} · {number(b.acres, 1)} acres
+                        </small>
+                      </th>
+                      <td>
+                        {number(r?.crop_water_use_in, 1)}
+                        <MetricInfo
+                          metric="etc"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {number(r?.effective_rain_in, 1)}
+                        <MetricInfo
+                          metric="rain"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {number(r?.water_applied_af, 1)}
+                        <MetricInfo
+                          metric="water"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {formatWeight(w?.tons_per_acre, yieldUnit, true)}
+                        <MetricInfo
+                          metric="harvest"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                        {pct && (
+                          <small className="potential">
+                            {pct} of potential
+                            <MetricInfo
+                              metric="relative"
+                              blockId={b.id}
+                              year={Number(year)}
+                            />
+                          </small>
+                        )}
+                      </td>
+                      <td>
+                        {formatWeight(w?.tons, yieldUnit, false)}
+                        <MetricInfo
+                          metric="harvest"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {number(r?.heat_stress_days)}
+                        <MetricInfo
+                          metric="heat"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {number(r?.gdd)}
+                        <MetricInfo
+                          metric="gdd"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                      <td>
+                        {money(r?.profit)}
+                        <MetricInfo
+                          metric="profit"
+                          blockId={b.id}
+                          year={Number(year)}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="caption">
+            GDD measures accumulated growing warmth. Heat days depend on the
+            crop thresholds in the backend.
+          </p>
+        </section>
+        <section className="panel what-if" id="what-if">
+          <div className="panel-heading">
+            <div>
+              <span className="eyebrow">
+                KEEP THE FARM. CHANGE A POSSIBILITY.
+              </span>
+              <h2>What if things were different?</h2>
+            </div>
+            <span className="scenario-symbol">↗</span>
+          </div>
+          <p className="subtle">
+            Compare against your original farm, using the same location and
+            historical years. Results below never overwrite the baseline above.
+          </p>
+          <div className="quick-actions">
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => compare("water")}
+            >
+              <ArrowDown size={15} /> Cut water budget 25%
+            </button>
+            <button
+              className="secondary"
+              disabled={busy}
+              onClick={() => compare("drip")}
+            >
+              <Droplets size={15} /> Compare all-drip irrigation
+            </button>
+          </div>
+          <p className="caption">
+            The water cut sets the budget to 75% of the baseline mean applied
+            water. Drip compatibility and installation costs are not assessed.
+          </p>
+          <details className="disclosure" open>
+            <summary>
+              Compare a crop, area, irrigation, or growing-window change
+            </summary>
+            <div className="scenario-form">
+              <label>
+                Crop entry
+                <select
+                  value={selected}
+                  onChange={(e) => chooseBlock(e.target.value)}
+                >
+                  {farm.blocks.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {CROPS[b.crop]?.name ?? b.crop} · {b.id}
                     </option>
                   ))}
                 </select>
               </label>
-            ))}
-          </div>
-          <p className="caption">
-            Annual crop swaps keep the selected growing months. Perennial swaps
-            use January to December. Calendar fit, soil, pests, equipment, and
-            local markets still need review.
-          </p>
-          <button className="primary" disabled={busy} onClick={() => compare()}>
-            {busy ? (
-              <>
-                <LoaderCircle size={16} className="spin" /> Comparing...
-              </>
-            ) : (
-              <>
-                Compare scenario
-                <ArrowUpRight size={16} />
-              </>
-            )}
-          </button>
-        </details>
-        {error && (
-          <p className="error-box" role="alert">
-            {error}
-          </p>
-        )}
-        {busy && (
-          <p className="caption" role="status">
-            Running the changed farm through{" "}
-            {mock ? "the demo fixture" : "the backend"}...
-          </p>
-        )}
-        {scenario && (
-          <div className="scenario-results" aria-live="polite">
-            <span className="eyebrow">
-              {mock ? "DEMO COMPARISON" : "MODEL COMPARISON"}
-            </span>
-            <h3>{scenarioTitle}</h3>
-            <Comparison base={result} result={scenario} />
-            <details className="disclosure">
-              <summary>Changed-scenario assumptions</summary>
+              <label>
+                Try this crop
+                <select
+                  value={change.crop}
+                  onChange={(e) =>
+                    setChange({
+                      ...change,
+                      crop: e.target.value,
+                      ...(CROPS[e.target.value]?.perennial
+                        ? { start_month: 1, end_month: 12 }
+                        : {}),
+                    })
+                  }
+                >
+                  {Object.entries(CROPS).map(([key, c]) => (
+                    <option key={key} value={key}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Area (acres)
+                <input
+                  type="number"
+                  min="0.0001"
+                  step="any"
+                  value={change.acres}
+                  onChange={(e) =>
+                    setChange({ ...change, acres: e.target.value })
+                  }
+                />
+              </label>
+              <label>
+                Irrigation
+                <select
+                  value={change.irrigation}
+                  onChange={(e) =>
+                    setChange({ ...change, irrigation: e.target.value })
+                  }
+                >
+                  {Object.entries(IRRIGATION).map(([key, name]) => (
+                    <option key={key} value={key}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {["start_month", "end_month"].map((field) => (
+                <label key={field}>
+                  {field === "start_month" ? "Start month" : "End month"}
+                  <select
+                    value={change[field]}
+                    disabled={CROPS[change.crop]?.perennial}
+                    onChange={(e) =>
+                      setChange({ ...change, [field]: Number(e.target.value) })
+                    }
+                  >
+                    {MONTHS.map((month, index) => (
+                      <option key={month} value={index + 1}>
+                        {month}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              ))}
+            </div>
+            <p className="caption">
+              Annual crop swaps keep the selected growing months. Perennial
+              swaps use January to December. Calendar fit, soil, pests,
+              equipment, and local markets still need review.
+            </p>
+            <button
+              className="primary"
+              disabled={busy}
+              onClick={() => compare()}
+            >
+              {busy ? (
+                <>
+                  <LoaderCircle size={16} className="spin" /> Comparing...
+                </>
+              ) : (
+                <>
+                  Compare scenario
+                  <ArrowUpRight size={16} />
+                </>
+              )}
+            </button>
+          </details>
+          {error && (
+            <p className="error-box" role="alert">
+              {error}
+            </p>
+          )}
+          {busy && (
+            <p className="caption" role="status">
+              Running the changed farm through{" "}
+              {mock ? "the demo fixture" : "the backend"}...
+            </p>
+          )}
+          {scenario && (
+            <div className="scenario-results" aria-live="polite">
+              <span className="eyebrow">
+                {mock ? "DEMO COMPARISON" : "MODEL COMPARISON"}
+              </span>
+              <h3>{scenarioTitle}</h3>
+              <Comparison base={result} result={scenario} />
+              <CalculationProvider result={scenario} farm={scenarioInput}>
+                <MetricInfo metric="summary" label="this what-if scenario" />
+              </CalculationProvider>
+              <details className="disclosure">
+                <summary>Changed-scenario assumptions</summary>
+                <ul className="assumptions">
+                  {scenario.assumptions.map((a, i) => (
+                    <li key={i}>{a}</li>
+                  ))}
+                </ul>
+              </details>
+            </div>
+          )}
+        </section>
+        <section className="panel assumption-panel">
+          <details>
+            <summary>
+              <Info size={18} />
+              <div>
+                <strong>Why these results?</strong>
+                <span>Model assumptions, data coverage, and limitations</span>
+              </div>
+              <ChevronDown size={18} />
+            </summary>
+            <div className="optional-content">
+              <p className="subtle">
+                {mock
+                  ? "Demo coordinates (not a measured NASA grid cell)"
+                  : "NASA POWER grid cell"}
+                : {result.location.grid_cell?.join(", ") ?? "Not supplied"}.
+                Regional weather does not capture every field's conditions.
+              </p>
               <ul className="assumptions">
-                {scenario.assumptions.map((a, i) => (
+                {result.assumptions.map((a, i) => (
                   <li key={i}>{a}</li>
                 ))}
               </ul>
-            </details>
-          </div>
-        )}
-      </section>
-      <section className="panel assumption-panel">
-        <details>
-          <summary>
-            <Info size={18} />
-            <div>
-              <strong>Why these results?</strong>
-              <span>Model assumptions, data coverage, and limitations</span>
+              <p className="caption">
+                Historical model outputs are not a future yield guarantee. These
+                scenarios support local review, not automatic crop or irrigation
+                prescriptions.
+              </p>
             </div>
-            <ChevronDown size={18} />
-          </summary>
-          <div className="optional-content">
-            <p className="subtle">
-              {mock
-                ? "Demo coordinates (not a measured NASA grid cell)"
-                : "NASA POWER grid cell"}
-              : {result.location.grid_cell?.join(", ") ?? "Not supplied"}.
-              Regional weather does not capture every field's conditions.
-            </p>
-            <ul className="assumptions">
-              {result.assumptions.map((a, i) => (
-                <li key={i}>{a}</li>
-              ))}
-            </ul>
-            <p className="caption">
-              Historical model outputs are not a future yield guarantee. These
-              scenarios support local review, not automatic crop or irrigation
-              prescriptions.
-            </p>
-          </div>
-        </details>
-      </section>
-    </div>
+          </details>
+        </section>
+      </div>
+    </CalculationProvider>
   );
 }
 const tooltipStyle = {

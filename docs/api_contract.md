@@ -165,7 +165,7 @@ One entry per season year, in the same order as `years`.
 | `relative_yield` | 0 to 1 | FAO-33 Ky method, plus a small cut for heat stress |
 | `heat_stress_days` | int | Days above the crop's heat stress threshold in the season |
 | `gdd` | number | Growing degree days over the season |
-| `revenue` | number or null | relative_yield x baseline_yield x acres x price |
+| `revenue` | number or null | (relative_yield / median relative_yield over this block's backtest) x baseline_yield x acres x price; same harvest basis as yield_weight |
 | `cost` | number or null | Production cost excluding water, plus surface water cost, plus groundwater pumping cost |
 | `profit` | number or null | revenue - cost |
 
@@ -506,3 +506,16 @@ Numbers above are from one run on cached Merced weather and show the shape only.
 4. **Verify.** The blocks run through the full `simulate` path. Average profit, cost, and water must match the optimizer within 1 percent (or the engine's rounding: one dollar per block plus one, 0.15 acre-ft), and no land, budget, water, crop share, or locked acre limit may be broken in any year. The engine must not have had to share out water. Any failure returns `status: "error"` instead of a plan.
 5. **Not included.** Installation cost for a new irrigation system and orchard establishment: new orchards take 3 to 5 years to bear, and establishment costs are not modeled. Frost does not lower modeled yields; it is used only to leave out frost sensitive planting windows (see Frost check).
 6. **Errors.** A `current_farm` season outside the weather record gets a `422`, like `/api/simulate`. Data service failures get a `502`.
+
+
+## Calculation details and financial interpretation
+
+Public `POST /api/simulate` responses include optional `calculation_details`. Old responses can omit it; the UI then reports that exact provenance is unavailable rather than inventing it. Model-internal calls with `include_comparisons=False` omit the audit payload.
+
+The payload contains the model/data commit, financial coverage and exclusions, annual totals, period revenue/cost/margin reconciliation, and a block/year trace with season dates, acreage, baseline yield and its median source years, the exact crop and electricity price years selected, regional study inputs, pump/water assumptions, and unrounded calculation intermediates. Source entries link to the immutable input extracts and embed matching records. Each weather link recreates the POWER request for the snapped coordinates, season dates, and parameters. Upstream POWER revisions can change a later replay; the link alone is not a byte-for-byte archive.
+
+**Revenue alignment change:** revenue now values the same median-normalized harvest as `yield_weight`, using rounded relative yields (as the harvest module does). The previous revenue formula omitted the median denominator and could disagree with the harvest displayed. This changes financial outputs and optimizer objectives. Dollars remain rounded to whole units in ordinary result rows; audit intermediates remain unrounded. A zero median yields unavailable harvest and financial outputs.
+
+**Costs are estimates, not farmer expenses.** They use the context-selected regional cost study excluding water, multiplied by acreage, plus modeled water cost. The study is held fixed across weather years, with no inflation adjustment. `optional.budget_usd` is a budget constraint/check, never an expense observation or a replacement for production cost. No actual-cost override was added here.
+
+Dollar totals still include only entries with all required financial inputs. Harvest/water totals can have broader coverage; `excluded_financial_blocks` makes that explicit. These dollar values are modeled margins on priced crops, not verified net farm income. The audit surfaces conflicting cost study year versus PDF-filename metadata as provisional instead of claiming it was verified. Tracing sources is separate from validating predictive accuracy.

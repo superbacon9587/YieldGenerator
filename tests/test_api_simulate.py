@@ -35,7 +35,7 @@ def test_simulate_endpoint(client, monkeypatch):
     data = r.json()
     assert set(data) == {"location", "years", "blocks", "farm_totals", "summary",
                          "waste_flags", "assumptions", "comparisons",
-                         "summary_stats", "budget", "land", "yield_weight"}
+                         "summary_stats", "budget", "land", "yield_weight", "calculation_details"}
     # 3 blocks x 3 other irrigation types, plus corn and oats planting windows
     # (each window list from crops.json minus the current start month).
     kinds = [row["kind"] for row in data["comparisons"]]
