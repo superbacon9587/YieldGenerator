@@ -1,6 +1,6 @@
 // Saved setups live in localStorage under one key so the Compare page (Part A)
 // and the Optimize tab (Part C) share the same list.
-import { CROPS } from "../../domain.js";
+import { CROPS, toSimulateRequest, uiFieldsOf } from "../../domain.js";
 
 export const SETUPS_KEY = "yg_saved_setups";
 export const MIN_COMPARE = 2;
@@ -13,13 +13,31 @@ const isSetup = (s) =>
   s.farm &&
   Array.isArray(s.farm.blocks);
 
+/**
+ * A setup whose farm holds only request contract fields. UI-only fields
+ * (period, optimize, and anything else) move to setup.ui, so setups saved
+ * before this split still compare without re-saving.
+ */
+export function cleanSetup(setup) {
+  const ui = { ...(setup.ui ?? {}), ...uiFieldsOf(setup.farm) };
+  return { ...setup, farm: toSimulateRequest(setup.farm), ui };
+}
+
+/** The farm form state for a setup: contract fields plus its UI fields. */
+export const setupFormFarm = (setup) => ({ ...(setup.ui ?? {}), ...setup.farm });
+
+/** Read saved setups. Old setups are cleaned and written back once. */
 export function loadSetups(storage = globalThis.localStorage) {
+  let raw;
   try {
-    const raw = JSON.parse(storage?.getItem(SETUPS_KEY) || "[]");
-    return Array.isArray(raw) ? raw.filter(isSetup) : [];
+    raw = JSON.parse(storage?.getItem(SETUPS_KEY) || "[]");
   } catch {
     return [];
   }
+  if (!Array.isArray(raw)) return [];
+  const setups = raw.filter(isSetup).map(cleanSetup);
+  if (JSON.stringify(setups) !== JSON.stringify(raw)) persistSetups(setups, storage);
+  return setups;
 }
 
 export function persistSetups(setups, storage = globalThis.localStorage) {
@@ -36,7 +54,8 @@ export function addSetup(setups, { name, farm, summary_stats = null }, now = new
   const clean = name.trim();
   const entry = {
     name: clean,
-    farm: structuredClone(farm),
+    farm: toSimulateRequest(farm),
+    ui: structuredClone(uiFieldsOf(farm)),
     saved_at: now.toISOString(),
     summary_stats,
   };

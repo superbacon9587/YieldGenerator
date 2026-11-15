@@ -1,6 +1,6 @@
 // Pure helpers for Part A: land check, period presets, summary numbers, budget.
 // Every helper tolerates an older backend that does not send the new fields.
-import { MONTHS, activeMonth, mean } from "../../domain.js";
+import { MONTHS, activeMonth, mean, presetYears as domainPresetYears } from "../../domain.js";
 
 export const DEFAULT_PERIOD = "20";
 export const FALLBACK_META = Object.freeze({
@@ -41,9 +41,7 @@ export function landCheck(blocks, available) {
 
 /** [first, last] for an N-year preset ending at the last full year. */
 export function presetYears(preset, meta = FALLBACK_META) {
-  const n = Number(preset);
-  const last = meta.last_full_year;
-  return [Math.max(meta.first_year, last - n + 1), last];
+  return domainPresetYears(preset, meta);
 }
 
 /** Presets that fit the history, falling back when /api/meta is unavailable. */

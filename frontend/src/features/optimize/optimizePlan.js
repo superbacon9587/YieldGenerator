@@ -1,6 +1,6 @@
 // Pure helpers for the Optimize tab (Part C). No React here, so node --test can run them.
 // Contract: docs/api_contract.md, "POST /api/optimize".
-import { CROPS, IRRIGATION, MONTHS, clone, requestFromForm, validateFarm } from "../../domain.js";
+import { CROPS, IRRIGATION, MONTHS, clone, toSimulateRequest, validateFarm } from "../../domain.js";
 import { generateMock } from "../../mock/generate.js";
 import { summaryOf, monthlyAcres } from "../summary/landBudget.js";
 
@@ -79,7 +79,7 @@ export function findBlockers(farm) {
 
 /** The POST /api/optimize body for the farm and its saved optimize settings. */
 export function buildRequest(farm) {
-  const base = requestFromForm(farm);
+  const base = toSimulateRequest(farm);
   const s = settingsOf(farm);
   const all = (list, known) => (list.length === known.length ? null : list);
   return {
@@ -103,7 +103,7 @@ export function buildRequest(farm) {
 
 /** Location, years, and block checks shared with the farm form. */
 export function farmErrors(farm) {
-  return validateFarm(requestFromForm(farm));
+  return validateFarm(toSimulateRequest(farm));
 }
 
 /** A farm form state with the plan's blocks, ready for the backtest or a saved setup. */

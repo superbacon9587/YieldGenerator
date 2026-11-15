@@ -1,5 +1,5 @@
 import { generateMock } from "./mock/generate.js";
-import { validateResponse } from "./domain.js";
+import { toSimulateRequest, validateResponse } from "./domain.js";
 import { FALLBACK_META, summaryOf } from "./features/summary/landBudget.js";
 import { rankLocally } from "./features/compare/savedSetups.js";
 export const USE_MOCK = import.meta.env?.VITE_USE_MOCK === "true";
@@ -41,15 +41,16 @@ async function request(path, options = {}) {
   return body;
 }
 export async function simulate(farm, { mock = USE_MOCK } = {}) {
+  const body = toSimulateRequest(farm);
   if (mock) {
     await new Promise((resolve) => setTimeout(resolve, 650));
-    return validateResponse(generateMock(farm));
+    return validateResponse(generateMock(body));
   }
   return validateResponse(
     await request("/api/simulate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(farm),
+      body: JSON.stringify(body),
     }),
   );
 }
@@ -90,9 +91,16 @@ export async function meta({ mock = USE_MOCK } = {}) {
   }
 }
 
+/** Compare configs with each farm cleaned to the request contract. */
+export const compareBody = (configs, rankedBy) => ({
+  configs: configs.map((c) => ({ name: c.name, farm: toSimulateRequest(c.farm) })),
+  ranked_by: rankedBy,
+});
+
 export async function compareSetups(configs, rankedBy, { mock = USE_MOCK } = {}) {
+  const body = compareBody(configs, rankedBy);
   if (mock) {
-    const entries = configs.map((c) => {
+    const entries = body.configs.map((c) => {
       const result = generateMock(c.farm);
       return { name: c.name, summary_stats: summaryOf(result), budget: null };
     });
@@ -102,6 +110,6 @@ export async function compareSetups(configs, rankedBy, { mock = USE_MOCK } = {})
   return request("/api/compare", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ configs, ranked_by: rankedBy }),
+    body: JSON.stringify(body),
   });
 }
